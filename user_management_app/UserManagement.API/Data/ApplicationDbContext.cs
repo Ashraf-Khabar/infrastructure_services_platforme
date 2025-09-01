@@ -13,7 +13,16 @@ namespace UserManagement.API.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
-            modelBuilder.Entity<User>().HasIndex(u => u.Email).IsUnique();
+            base.OnModelCreating(modelBuilder);
+            
+            modelBuilder.Entity<User>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.FirstName).IsRequired();
+                entity.Property(e => e.LastName).IsRequired();
+                entity.Property(e => e.Email).IsRequired();
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            });
         }
     }
 }

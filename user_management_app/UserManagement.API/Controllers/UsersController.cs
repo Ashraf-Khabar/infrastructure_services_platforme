@@ -9,63 +9,63 @@ namespace UserManagement.API.Controllers
     public class UsersController : ControllerBase
     {
         private readonly IUserService _userService;
+        private readonly ILogger<UsersController> _logger;
 
-        public UsersController(IUserService userService)
+        public UsersController(IUserService userService, ILogger<UsersController> logger)
         {
             _userService = userService;
+            _logger = logger;
         }
 
         [HttpGet]
-        public async Task<ActionResult<List<User>>> GetUsers()
+        public async Task<IActionResult> GetUsers()
         {
-            return Ok(await _userService.GetAllUsersAsync());
-        }
-
-        [HttpGet("{id}")]
-        public async Task<ActionResult<User>> GetUser(int id)
-        {
-            var user = await _userService.GetUserByIdAsync(id);
-            if (user == null) return NotFound();
-            return Ok(user);
+            try
+            {
+                _logger.LogInformation("Getting all users");
+                var users = await _userService.GetUsersAsync();
+                return Ok(users);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting users");
+                return StatusCode(500, "Internal server error");
+            }
         }
 
         [HttpPost]
-        public async Task<ActionResult<User>> CreateUser(User user)
+        public async Task<IActionResult> CreateUser([FromBody] User user)
         {
             try
             {
+                _logger.LogInformation("Creating user: {Email}", user.Email);
+                
+                if (!ModelState.IsValid)
+                {
+                    _logger.LogWarning("Invalid model state: {Errors}", ModelState.Values);
+                    return BadRequest(ModelState);
+                }
+
                 var createdUser = await _userService.CreateUserAsync(user);
-                return CreatedAtAction(nameof(GetUser), new { id = createdUser.Id }, createdUser);
+                _logger.LogInformation("User created with ID: {Id}", createdUser.Id);
+                
+                return CreatedAtAction(nameof(GetUsers), new { id = createdUser.Id }, createdUser);
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning(ex, "Validation error");
+                return BadRequest(ex.Message);
             }
             catch (InvalidOperationException ex)
             {
+                _logger.LogWarning(ex, "Business rule violation");
                 return BadRequest(ex.Message);
             }
-        }
-
-        [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateUser(int id, User user)
-        {
-            if (id != user.Id) return BadRequest();
-            
-            try
+            catch (Exception ex)
             {
-                var updatedUser = await _userService.UpdateUserAsync(id, user);
-                if (updatedUser == null) return NotFound();
-                return NoContent();
+                _logger.LogError(ex, "Error creating user");
+                return StatusCode(500, "Internal server error");
             }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(ex.Message);
-            }
-        }
-
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteUser(int id)
-        {
-            var result = await _userService.DeleteUserAsync(id);
-            if (!result) return NotFound();
-            return NoContent();
         }
     }
 }

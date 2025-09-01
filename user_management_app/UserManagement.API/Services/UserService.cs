@@ -7,123 +7,60 @@ namespace UserManagement.API.Services
     public class UserService : IUserService
     {
         private readonly ApplicationDbContext _context;
+        private readonly ILogger<UserService> _logger;
 
-        public UserService(ApplicationDbContext context)
+        public UserService(ApplicationDbContext context, ILogger<UserService> logger)
         {
             _context = context;
-        }
-
-        public async Task<List<User>> GetAllUsersAsync()
-        {
-            return await _context.Users.OrderByDescending(u => u.CreatedAt).ToListAsync();
-        }
-
-        public async Task<User?> GetUserByIdAsync(int id)
-        {
-            return await _context.Users.FindAsync(id);
-        }
-
-        public async Task<User?> GetUserByEmailAsync(string email)
-        {
-            return await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
-        }
-
-        public async Task<User?> GetUserByUsernameAsync(string username)
-        {
-            return await _context.Users.FirstOrDefaultAsync(u => u.Username == username);
+            _logger = logger;
         }
 
         public async Task<User> CreateUserAsync(User user)
         {
-            // Vérifier si l'email existe déjà
-            if (await _context.Users.AnyAsync(u => u.Email == user.Email))
-                throw new InvalidOperationException("Email already exists");
+            try
+            {
+                // Validation
+                if (string.IsNullOrEmpty(user.FirstName))
+                    throw new ArgumentException("Le prénom est requis");
 
-            // Vérifier si le username existe déjà
-            if (await _context.Users.AnyAsync(u => u.Username == user.Username))
-                throw new InvalidOperationException("Username already exists");
+                if (string.IsNullOrEmpty(user.LastName))
+                    throw new ArgumentException("Le nom est requis");
 
-            user.CreatedAt = DateTime.UtcNow;
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
-            return user;
+                if (string.IsNullOrEmpty(user.Email))
+                    throw new ArgumentException("L'email est requis");
+
+                // Vérifier si l'email existe déjà
+                if (await _context.Users.AnyAsync(u => u.Email == user.Email))
+                    throw new InvalidOperationException("Un utilisateur avec cet email existe déjà");
+
+                // Set default values
+                user.CreatedAt = DateTime.UtcNow;
+                user.IsActive = true;
+
+                _context.Users.Add(user);
+                await _context.SaveChangesAsync();
+                
+                _logger.LogInformation("User created successfully: {Email}", user.Email);
+                return user;
+            }
+            catch (DbUpdateException ex)
+            {
+                _logger.LogError(ex, "Database error while creating user");
+                throw new Exception("Erreur de base de données");
+            }
         }
 
-        public async Task<User?> UpdateUserAsync(int id, User user)
+        public async Task<List<User>> GetUsersAsync()
         {
-            var existingUser = await _context.Users.FindAsync(id);
-            if (existingUser == null)
-                return null;
-
-            // Vérifier les doublons d'email
-            if (user.Email != existingUser.Email && 
-                await _context.Users.AnyAsync(u => u.Email == user.Email && u.Id != id))
-                throw new InvalidOperationException("Email already exists");
-
-            // Vérifier les doublons de username
-            if (user.Username != existingUser.Username && 
-                await _context.Users.AnyAsync(u => u.Username == user.Username && u.Id != id))
-                throw new InvalidOperationException("Username already exists");
-
-            existingUser.FirstName = user.FirstName;
-            existingUser.LastName = user.LastName;
-            existingUser.Email = user.Email;
-            existingUser.PhoneNumber = user.PhoneNumber;
-            existingUser.Username = user.Username;
-            existingUser.Role = user.Role;
-            existingUser.DateOfBirth = user.DateOfBirth;
-            existingUser.Address = user.Address;
-            existingUser.City = user.City;
-            existingUser.Country = user.Country;
-            existingUser.PostalCode = user.PostalCode;
-            existingUser.IsActive = user.IsActive;
-            existingUser.UpdatedAt = DateTime.UtcNow;
-
-            await _context.SaveChangesAsync();
-            return existingUser;
-        }
-
-        public async Task<bool> DeleteUserAsync(int id)
-        {
-            var user = await _context.Users.FindAsync(id);
-            if (user == null)
-                return false;
-
-            _context.Users.Remove(user);
-            await _context.SaveChangesAsync();
-            return true;
-        }
-
-        public async Task<bool> ToggleUserStatusAsync(int id)
-        {
-            var user = await _context.Users.FindAsync(id);
-            if (user == null)
-                return false;
-
-            user.IsActive = !user.IsActive;
-            user.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-            return true;
-        }
-
-        public async Task<int> GetUsersCountAsync()
-        {
-            return await _context.Users.CountAsync();
-        }
-
-        public async Task<int> GetActiveUsersCountAsync()
-        {
-            return await _context.Users.CountAsync(u => u.IsActive);
-        }
-
-        public async Task<List<User>> SearchUsersAsync(string searchTerm)
-        {
-            return await _context.Users
-                .Where(u => u.FirstName.Contains(searchTerm) || 
-                           u.LastName.Contains(searchTerm) || 
-                           u.Email.Contains(searchTerm) || 
-                           u.Username.Contains(searchTerm))
-                .ToListAsync();
+            try
+            {
+                return await _context.Users.ToListAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting users");
+                throw;
+            }
         }
     }
 }
