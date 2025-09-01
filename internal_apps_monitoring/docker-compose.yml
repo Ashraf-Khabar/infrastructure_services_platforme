@@ -1,0 +1,180 @@
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - mynet
+
+  db:
+    image: postgres:13
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: sonar
+      POSTGRES_DB: keycloak
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mynet
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:22.0
+    command: ["start-dev", "--http-port=9091"]  # Changed to 9091
+    environment:
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+      - KC_HOSTNAME=keycloak.host.internal
+      - KC_PROXY=edge
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://db:5432/keycloak
+      - KC_DB_USERNAME=sonar
+      - KC_DB_PASSWORD=sonar
+      - KC_HTTP_ENABLED=true
+      - KC_HTTP_PORT=9091  # Must match the command line port
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.keycloak.rule=Host(`keycloak.host.internal`)"
+      - "traefik.http.services.keycloak.loadbalancer.server.port=9091"  # Updated
+    networks:
+      - mynet
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  jenkins:
+    image: jenkins/jenkins:lts
+    volumes:
+      - jenkins_data:/var/jenkins_home
+    environment:
+      - JENKINS_SMTP_HOST=mails
+      - JENKINS_SMTP_PORT=1025
+      - JENKINS_SMTP_AUTH=false
+      - JENKINS_SMTP_SSL=false
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jenkins.rule=Host(`jenkins.host.internal`)"
+      - "traefik.http.services.jenkins.loadbalancer.server.port=8080"
+    networks:
+      - mynet
+    depends_on:
+      - mails
+
+  mails:
+    image: mailhog/mailhog
+    hostname: mails
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailhog.rule=Host(`mail.host.internal`)"
+      - "traefik.http.services.mailhog.loadbalancer.server.port=8025"
+    networks:
+      - mynet
+  
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.host.internal`)"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+    networks:
+      - mynet
+
+  grafana:
+    image: grafana/grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.host.internal`)"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    networks:
+      - mynet
+    depends_on:
+      - prometheus
+  
+  sonarqube:
+    image: sonarqube:lts-community
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.sonarqube.rule=Host(`sonar.host.internal`)"
+      - "traefik.http.services.sonarqube.loadbalancer.server.port=9000"
+    networks:
+      - mynet
+    depends_on:
+      - db
+
+  nexus:
+    image: sonatype/nexus3:3.47.1
+    environment:
+      - INSTALL4J_ADD_VM_PARAMS=-Djava.util.prefs.userRoot=/nexus-data -Djava.version=17
+    volumes:
+      - nexus_data:/nexus-data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nexus.rule=Host(`nexus.host.internal`)"
+      - "traefik.http.services.nexus.loadbalancer.server.port=8081"
+    networks:
+      - mynet
+  
+  app-db:
+    image: postgres:15
+    container_name: user-management-db
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppassword
+      POSTGRES_DB: user_management
+    volumes:
+      - app_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mynet
+
+networks:
+  mynet:
+    driver: bridge
+
+volumes:
+  jenkins_data:
+  grafana_data:
+  sonarqube_data:
+  sonarqube_extensions:
+  postgres_data:
+  nexus_data:
+  keycloak_data:
+  app_postgres_data:
