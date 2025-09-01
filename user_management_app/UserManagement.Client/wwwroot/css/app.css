@@ -1,0 +1,13 @@
+body {
+    margin: 0;
+    font-family: 'Roboto', sans-serif;
+    background-color: #f5f5f5;
+}
+
+#app {
+    height: 100vh;
+}
+
+.mud-main-content {
+    padding: 20px;
+}

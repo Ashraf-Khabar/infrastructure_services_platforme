@@ -1,0 +1,99 @@
+@page "/"
+@using MudBlazor
+@using UserManagement.Client.Models
+@using UserManagement.Client.Services
+@inject IUserService UserService
+@inject NavigationManager Navigation
+
+<MudGrid>
+    <MudItem xs="12">
+        <MudText Typo="Typo.h4" Class="mb-4">Dashboard</MudText>
+        <MudText Color="Color.Secondary" Class="mb-6">Gestion des utilisateurs de la plateforme</MudText>
+    </MudItem>
+</MudGrid>
+
+<MudGrid Class="mt-4" Spacing="3">
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4 text-center" Elevation="3">
+            <MudIcon Icon="@Icons.Material.Filled.People" Size="Size.Large" Color="Color.Primary" Class="mb-2" />
+            <MudText Typo="Typo.h6">Total Utilisateurs</MudText>
+            <MudText Typo="Typo.h4" Color="Color.Primary">@users.Count</MudText>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4 text-center" Elevation="3">
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Large" Color="Color.Success" Class="mb-2" />
+            <MudText Typo="Typo.h6">Utilisateurs Actifs</MudText>
+            <MudText Typo="Typo.h4" Color="Color.Success">@users.Count(u => u.IsActive)</MudText>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4 text-center" Elevation="3">
+            <MudIcon Icon="@Icons.Material.Filled.Group" Size="Size.Large" Color="Color.Info" Class="mb-2" />
+            <MudText Typo="Typo.h6">Nouveaux (7j)</MudText>
+            <MudText Typo="Typo.h4" Color="Color.Info">@users.Count(u => u.CreatedAt > DateTime.Now.AddDays(-7))</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<MudGrid Class="mt-6">
+    <MudItem xs="12" md="8">
+        <MudPaper Class="pa-4" Elevation="3">
+            <MudText Typo="Typo.h6" Class="mb-4">Derniers Utilisateurs</MudText>
+            
+            @if (users.Any())
+            {
+                <MudTable Items="@users.Take(5)" Hover="true">
+                    <HeaderContent>
+                        <MudTh>Nom</MudTh>
+                        <MudTh>Email</MudTh>
+                        <MudTh>Date</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@context.FirstName @context.LastName</MudTd>
+                        <MudTd>@context.Email</MudTd>
+                        <MudTd>@context.CreatedAt.ToString("dd/MM/yyyy")</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+            else
+            {
+                <MudText>Aucun utilisateur trouvé</MudText>
+            }
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="4">
+        <MudPaper Class="pa-4" Elevation="3">
+            <MudText Typo="Typo.h6" Class="mb-4">Actions Rapides</MudText>
+            
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" 
+                      StartIcon="@Icons.Material.Filled.Add" Class="mb-3"
+                      OnClick="@(() => Navigation.NavigateTo("/create"))">
+                Nouvel Utilisateur
+            </MudButton>
+            
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" FullWidth="true" 
+                      StartIcon="@Icons.Material.Filled.List" Class="mb-3"
+                      OnClick="@(() => Navigation.NavigateTo("/users"))">
+                Voir tous les utilisateurs
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private List<User> users = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsers();
+    }
+
+    private async Task LoadUsers()
+    {
+        users = await UserService.GetUsersAsync();
+    }
+}
