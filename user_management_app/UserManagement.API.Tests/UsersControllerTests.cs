@@ -5,7 +5,7 @@ using UserManagement.API.Models;
 using UserManagement.API.Services;
 using Xunit;
 
-# this file is for unit tests for UsersController for the jenkins pipeline  
+# this file is for unit tests for UsersController
 
 namespace UserManagement.API.Tests
 {
