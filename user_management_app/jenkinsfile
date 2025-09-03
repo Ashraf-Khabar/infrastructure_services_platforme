@@ -1,55 +1,16 @@
 pipeline {
-    agent any
-
-    stages {
-        stage('Installation de .NET SDK') {
-            steps {
-                sh '''
-                    # Installation manuelle de .NET SDK sans apt-get
-                    echo "Installation de .NET SDK 8.0..."
-                    
-                    # Vérifier si curl est disponible, sinon utiliser wget
-                    if command -v curl >/dev/null 2>&1; then
-                        curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-                    else
-                        wget -q https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
-                    fi
-
-                    sudo apt install libicu-dev -y
-                    
-                    chmod +x dotnet-install.sh
-                    ./dotnet-install.sh --channel 8.0 --install-dir ${HOME}/.dotnet
-                '''
-            }
-        }
-
-        stage('Build') {
-            steps {
-                sh '''
-                    # Utiliser le chemin complet pour éviter les problèmes de PATH
-                    echo "Version de .NET:"
-                '''
-            }
-        }
-        
-        stage('Test') {
-            steps {
-                sh '''
-                    echo "Exécution des tests..."
-                '''
-            }
+    agent {
+        docker {
+            image 'mcr.microsoft.com/dotnet/sdk:8.0'
+            args '-v /var/jenkins_home:/var/jenkins_home'
         }
     }
-
-    post {
-        always {
-            echo "Nettoyage terminé"
-        }
-        success {
-            echo "Build réussi!"
-        }
-        failure {
-            echo "Build échoué!"
+    stages {
+        stage('Build') {
+            steps {
+                sh 'dotnet --version'
+                sh 'dotnet build'
+            }
         }
     }
 }
