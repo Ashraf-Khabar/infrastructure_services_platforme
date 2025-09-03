@@ -1,44 +1,34 @@
 pipeline {
     agent any
-    environment {
-        DOTNET_VERSION = '8.0'
-    }
     stages {
-        stage('Install .NET') {
+        stage('Check .NET') {
             steps {
                 script {
                     if (isUnix()) {
                         sh '''
-                        echo "Installing .NET ${DOTNET_VERSION}..."
-                        wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
-                        chmod +x dotnet-install.sh
-                        ./dotnet-install.sh --channel ${DOTNET_VERSION} --install-dir /usr/share/dotnet
-                        export PATH="$PATH:/usr/share/dotnet"
-                        dotnet --version
-                        echo "Installation terminée !"
+                        echo "Vérification de .NET..."
+                        if command -v dotnet >/dev/null 2>&1; then
+                            dotnet --version
+                            echo ".NET est déjà installé"
+                        else
+                            echo ".NET n'est pas installé"
+                            exit 1
+                        fi
                         '''
                     } else {
                         bat '''
-                        echo "Installing .NET on Windows..."
-                        powershell -Command "& {iwr -useb https://dot.net/v1/dotnet-install.ps1 | iex}"
+                        echo "Vérification de .NET..."
                         dotnet --version
-                        echo "Installation terminée !"
+                        if %errorlevel% equ 0 (
+                            echo .NET est déjà installé
+                        ) else (
+                            echo .NET n'est pas installé
+                            exit 1
+                        )
                         '''
                     }
                 }
             }
-        }
-    }
-    
-    post {
-        always {
-            echo "Installation de .NET terminée"
-        }
-        success {
-            echo ".NET installé avec succès !"
-        }
-        failure {
-            echo "Échec de l'installation de .NET"
         }
     }
 }
