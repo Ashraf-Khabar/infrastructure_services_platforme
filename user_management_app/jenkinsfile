@@ -15,10 +15,7 @@ pipeline {
                         wget -q https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
                     fi
 
-                    sudo apt install libicu-dev
-                    sudo apt install icu-devtools
-                    sudo dnf install libicu-devel
-
+                    sudo apt install libicu-dev -y
                     
                     chmod +x dotnet-install.sh
                     ./dotnet-install.sh --channel 8.0 --install-dir ${HOME}/.dotnet
