@@ -1,0 +1,8 @@
+/mnt/c/Users/khaba/OneDrive/Bureau/DevSecOps_practices/infrastructure_services_platforme/user_management_app/UserManagement.API/obj/Debug/net8.0/UserManagement.API.csproj.AssemblyReference.cache
+/mnt/c/Users/khaba/OneDrive/Bureau/DevSecOps_practices/infrastructure_services_platforme/user_management_app/UserManagement.API/obj/Debug/net8.0/UserManagement.API.GeneratedMSBuildEditorConfig.editorconfig
+/mnt/c/Users/khaba/OneDrive/Bureau/DevSecOps_practices/infrastructure_services_platforme/user_management_app/UserManagement.API/obj/Debug/net8.0/UserManagement.API.AssemblyInfoInputs.cache
+/mnt/c/Users/khaba/OneDrive/Bureau/DevSecOps_practices/infrastructure_services_platforme/user_management_app/UserManagement.API/obj/Debug/net8.0/UserManagement.API.AssemblyInfo.cs
+/mnt/c/Users/khaba/OneDrive/Bureau/DevSecOps_practices/infrastructure_services_platforme/user_management_app/UserManagement.API/obj/Debug/net8.0/UserManagement.API.csproj.CoreCompileInputs.cache
+/mnt/c/Users/khaba/OneDrive/Bureau/DevSecOps_practices/infrastructure_services_platforme/user_management_app/UserManagement.API/obj/Debug/net8.0/UserManagement.API.MvcApplicationPartsAssemblyInfo.cs
+/mnt/c/Users/khaba/OneDrive/Bureau/DevSecOps_practices/infrastructure_services_platforme/user_management_app/UserManagement.API/obj/Debug/net8.0/UserManagement.API.MvcApplicationPartsAssemblyInfo.cache
+/mnt/c/Users/khaba/OneDrive/Bureau/DevSecOps_practices/infrastructure_services_platforme/user_management_app/UserManagement.API/obj/Debug/net8.0/UserManagement.API.sourcelink.json
