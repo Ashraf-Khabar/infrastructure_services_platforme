@@ -4,6 +4,7 @@ pipeline {
     environment {
         DOTNET_ROOT = "${WORKSPACE}/dotnet"
         PATH = "${env.DOTNET_ROOT}:${env.PATH}"
+        DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = "1"
     }
     
     stages {
@@ -11,16 +12,13 @@ pipeline {
             steps {
                 script {
                     sh '''
-                        # Télécharger le script d'installation
+                        # Installer .NET localement
                         curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
                         chmod +x dotnet-install.sh
-                        
-                        # Installer .NET localement dans le workspace
                         ./dotnet-install.sh --channel 8.0 --install-dir ./dotnet
                         
-                        # Vérifier l'installation
-                        ./dotnet/dotnet --version
-                        ./dotnet/dotnet --info
+                        # Vérifier avec mode invariant
+                        DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 ./dotnet/dotnet --version
                     '''
                 }
             }
