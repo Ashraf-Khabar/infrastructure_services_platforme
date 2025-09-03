@@ -1,17 +1,146 @@
 pipeline {
-    agent {
-        docker {
-            image 'mcr.microsoft.com/dotnet/sdk:8.0'  // Use appropriate version
-            args '-v /var/jenkins_home:/var/jenkins_home'
-        }
+    agent any
+
+    environment {
+        DOTNET_VERSION = '8.0'
+        DOTNET_INSTALL_DIR = '/usr/share/dotnet'
     }
-    
+
     stages {
+        stage('Vérification des prérequis') {
+            steps {
+                script {
+                    echo "Vérification de l'agent Jenkins..."
+                    sh '''
+                        echo "Système d'exploitation:"
+                        uname -a
+                        echo "Distribution Linux:"
+                        lsb_release -a 2>/dev/null || cat /etc/*release 2>/dev/null || echo "Impossible de déterminer la distribution"
+                    '''
+                }
+            }
+        }
+
+        stage('Installation de .NET SDK') {
+            steps {
+                script {
+                    echo "Installation de .NET SDK ${env.DOTNET_VERSION}..."
+                    
+                    sh """
+                        # Vérifier si dotnet est déjà installé
+                        if command -v dotnet &> /dev/null; then
+                            echo ".NET SDK est déjà installé:"
+                            dotnet --version
+                            exit 0
+                        fi
+
+                        # Détecter la distribution Linux
+                        if [ -f /etc/os-release ]; then
+                            . /etc/os-release
+                            OS=\$ID
+                            OS_VERSION=\$VERSION_ID
+                        else
+                            echo "Impossible de détecter la distribution Linux"
+                            exit 1
+                        fi
+
+                        echo "Distribution détectée: \$OS version \$OS_VERSION"
+
+                        # Installation basée sur la distribution
+                        case \$OS in
+                            ubuntu|debian)
+                                echo "Installation pour Ubuntu/Debian..."
+                                apt-get update
+                                apt-get install -y wget apt-transport-https
+                                
+                                # Ajouter le repository Microsoft
+                                wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+                                dpkg -i packages-microsoft-prod.deb
+                                rm packages-microsoft-prod.deb
+                                
+                                # Installer le SDK .NET
+                                apt-get update
+                                apt-get install -y dotnet-sdk-${env.DOTNET_VERSION}
+                                ;;
+                            centos|rhel|fedora)
+                                echo "Installation pour CentOS/RHEL/Fedora..."
+                                rpm -Uvh https://packages.microsoft.com/config/centos/7/packages-microsoft-prod.rpm
+                                yum install -y dotnet-sdk-${env.DOTNET_VERSION}
+                                ;;
+                            *)
+                                echo "Distribution non supportée: \$OS"
+                                echo "Tentative d'installation via le script officiel..."
+                                # Installation via le script officiel Microsoft
+                                wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
+                                chmod +x ./dotnet-install.sh
+                                ./dotnet-install.sh --version ${env.DOTNET_VERSION} --install-dir ${env.DOTNET_INSTALL_DIR}
+                                rm dotnet-install.sh
+                                ;;
+                        esac
+
+                        # Ajouter dotnet au PATH si nécessaire
+                        if [ ! -z "${env.DOTNET_INSTALL_DIR}" ] && [ -d "${env.DOTNET_INSTALL_DIR}" ]; then
+                            echo "Ajout de ${env.DOTNET_INSTALL_DIR} au PATH"
+                            export PATH="\\$PATH:${env.DOTNET_INSTALL_DIR}"
+                            echo "export PATH=\\$PATH:${env.DOTNET_INSTALL_DIR}" >> ~/.bashrc
+                        fi
+
+                        # Vérifier l'installation
+                        echo "Vérification de l'installation:"
+                        dotnet --version || echo "Échec de l'installation de .NET SDK"
+                    """
+                }
+            }
+        }
+
         stage('Build') {
             steps {
-                sh 'dotnet --version'
-                sh 'dotnet build'
+                sh """
+                    # S'assurer que dotnet est dans le PATH
+                    export PATH="\\$PATH:${env.DOTNET_INSTALL_DIR}"
+                    echo "Version de .NET:"
+                    dotnet --version
+                    echo "Construction du projet..."
+                    dotnet build --configuration Release
+                """
             }
+        }
+        
+        stage('Test') {
+            steps {
+                sh """
+                    export PATH="\\$PATH:${env.DOTNET_INSTALL_DIR}"
+                    echo "Exécution des tests..."
+                    dotnet test
+                """
+            }
+        }
+
+        stage('Publication') {
+            steps {
+                sh """
+                    export PATH="\\$PATH:${env.DOTNET_INSTALL_DIR}"
+                    echo "Publication de l'application..."
+                    dotnet publish --configuration Release --output ./publish
+                """
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Nettoyage du processus de build"
+            sh '''
+                echo "Suppression des fichiers temporaires..."
+                rm -rf bin/ obj/ 2>/dev/null || true
+            '''
+        }
+        success {
+            echo "Build réussi!"
+            archiveArtifacts artifacts: 'publish/**/*', fingerprint: true
+        }
+        failure {
+            echo "Build échoué!"
         }
     }
 }
