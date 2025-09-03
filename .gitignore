@@ -1,0 +1,16 @@
+*.log
+*.tmp
+.DS_Store
+node_modules/
+dist/
+.env
+.vscode/
+.idea/
+*.swp
+*.bak
+*.old
+*.class
+*.jar
+*.war
+*.iml
+*.pyc       
