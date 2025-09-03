@@ -7,22 +7,26 @@ pipeline {
     }
     
     stages {
-        stage('Installation Dépendances') {
+        stage('Installation .NET') {
             steps {
                 script {
                     sh '''
-                        # Mettre à jour et installer les dépendances
-                        apt-get update
-                        apt-get install -y wget libicu-dev
+                        # Créer le répertoire d'installation
+                        sudo mkdir -p /usr/share/dotnet
+                        sudo chmod 755 /usr/share/dotnet
                         
-                        # Télécharger .NET
-                        wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-                        dpkg -i packages-microsoft-prod.deb
-                        apt-get update
-                        apt-get install -y dotnet-sdk-8.0
+                        # Télécharger le script d'installation .NET
+                        curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+                        chmod +x dotnet-install.sh
+                        
+                        # Installer .NET SDK 8.0
+                        ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
+                        
+                        # Installer libicu-dev (nécessaire pour .NET)
+                        sudo apt-get update && sudo apt-get install -y libicu-dev || echo "Installation ICU optionnelle"
                         
                         # Vérifier l'installation
-                        dotnet --version
+                        /usr/share/dotnet/dotnet --version
                     '''
                 }
             }
@@ -30,7 +34,7 @@ pipeline {
         
         stage('Build') {
             steps {
-                sh 'dotnet build'
+                sh '/usr/share/dotnet/dotnet build'
             }
         }
     }
