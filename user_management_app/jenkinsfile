@@ -1,57 +1,21 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'mcr.microsoft.com/dotnet/sdk:8.0'
+            args '-v /tmp:/tmp'
+            reuseNode true
+        }
+    }
     stages {
-        stage('Install Dependencies') {
+        stage('Checkout') {
             steps {
-                script {
-                    if (isUnix()) {
-                        sh '''
-                        echo "Installation des dépendances système..."
-                        apt-get update
-                        apt-get install -y libicu-dev libssl-dev zlib1g-dev
-                        '''
-                    }
-                }
+                checkout scm
             }
         }
-        
-        stage('Setup .NET') {
+        stage('Build') {
             steps {
-                script {
-                    if (isUnix()) {
-                        sh '''
-                        # Vérifie si .NET est déjà installé
-                        if command -v dotnet >/dev/null 2>&1; then
-                            echo ".NET est déjà installé : $(dotnet --version)"
-                        else
-                            echo "Installation de .NET..."
-                            curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel LTS
-                            export PATH="$HOME/.dotnet:$PATH"
-                            echo "export PATH=\"\$HOME/.dotnet:\$PATH\"" >> ~/.bashrc
-                            source ~/.bashrc
-                            
-                            # Vérification
-                            dotnet --info
-                            echo ".NET installé avec succès"
-                        fi
-                        '''
-                    } else {
-                        bat '''
-                        echo "Vérification de .NET..."
-                        dotnet --version 2>nul
-                        if %errorlevel% equ 0 (
-                            echo .NET est déjà installé
-                        ) else (
-                            echo Installation de .NET...
-                            powershell -Command "Invoke-WebRequest -Uri https://dot.net/v1/dotnet-install.ps1 -OutFile dotnet-install.ps1"
-                            powershell -Command "& {./dotnet-install.ps1 -Channel LTS}"
-                            setx PATH "%USERPROFILE%\\.dotnet;%PATH%"
-                            dotnet --version
-                            echo .NET installé avec succès
-                        )
-                        '''
-                    }
-                }
+                sh 'dotnet --version'
+                sh 'dotnet build'
             }
         }
     }
