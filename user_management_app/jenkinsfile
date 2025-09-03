@@ -1,9 +1,6 @@
 pipeline {
-    agent {
-        any {
-            label 'dotnet'
-        }
-    }
+    agent any
+    
     stages {
         stage('Checkout') {
             steps {
