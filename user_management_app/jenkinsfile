@@ -1,6 +1,20 @@
 pipeline {
     agent any
     stages {
+        stage('Install Dependencies') {
+            steps {
+                script {
+                    if (isUnix()) {
+                        sh '''
+                        echo "Installation des dépendances système..."
+                        apt-get update
+                        apt-get install -y libicu-dev libssl-dev zlib1g-dev
+                        '''
+                    }
+                }
+            }
+        }
+        
         stage('Setup .NET') {
             steps {
                 script {
@@ -14,7 +28,10 @@ pipeline {
                             curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel LTS
                             export PATH="$HOME/.dotnet:$PATH"
                             echo "export PATH=\"\$HOME/.dotnet:\$PATH\"" >> ~/.bashrc
-                            dotnet --version
+                            source ~/.bashrc
+                            
+                            # Vérification
+                            dotnet --info
                             echo ".NET installé avec succès"
                         fi
                         '''
