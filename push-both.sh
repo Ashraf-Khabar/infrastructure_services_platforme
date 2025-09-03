@@ -2,16 +2,25 @@
 
 # Script de synchronisation pour deux dépôts distants
 
+# 1. D'abord pousser les changements vers GitHub
+echo "Pushing les changements vers GitHub..."
+# Ajouter tous les nouveaux fichiers
+git add .
+
+# Vérifier ce qui va être commité
+git status
+
+# Committer
+git commit -m "Ajout des nouveaux fichiers"
+
+git push origin HEAD
+
 # Configuration
 GITHUB_REPO="origin"
 GITLAB_REPO="gitlab"
 CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
 
 echo "Démarrage de la synchronisation"
-
-# 1. D'abord pousser les changements vers GitHub
-echo "Pushing les changements vers GitHub..."
-git push $GITHUB_REPO $CURRENT_BRANCH
 
 # Vérifier si le push a réussi
 if [ $? -ne 0 ]; then
