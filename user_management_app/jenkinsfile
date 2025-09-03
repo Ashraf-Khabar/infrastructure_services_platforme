@@ -14,14 +14,14 @@ pipeline {
                     else
                         wget -q https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
                     fi
+
+                    sudo apt install libicu-dev
+                    sudo apt install icu-devtools
+                    sudo dnf install libicu-devel
+
                     
                     chmod +x dotnet-install.sh
                     ./dotnet-install.sh --channel 8.0 --install-dir ${HOME}/.dotnet
-                    rm dotnet-install.sh
-                    
-                    # Vérifier l'installation
-                    echo "Version de .NET installée:"
-                    ${HOME}/.dotnet/dotnet --version
                 '''
             }
         }
