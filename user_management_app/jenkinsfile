@@ -1,29 +1,36 @@
 pipeline {
     agent any
     stages {
-        stage('Check .NET') {
+        stage('Setup .NET') {
             steps {
                 script {
                     if (isUnix()) {
                         sh '''
-                        echo "Vérification de .NET..."
+                        # Vérifie si .NET est déjà installé
                         if command -v dotnet >/dev/null 2>&1; then
-                            dotnet --version
-                            echo ".NET est déjà installé"
+                            echo ".NET est déjà installé : $(dotnet --version)"
                         else
-                            echo ".NET n'est pas installé"
-                            exit 1
+                            echo "Installation de .NET..."
+                            curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel LTS
+                            export PATH="$HOME/.dotnet:$PATH"
+                            echo "export PATH=\"\$HOME/.dotnet:\$PATH\"" >> ~/.bashrc
+                            dotnet --version
+                            echo ".NET installé avec succès"
                         fi
                         '''
                     } else {
                         bat '''
                         echo "Vérification de .NET..."
-                        dotnet --version
+                        dotnet --version 2>nul
                         if %errorlevel% equ 0 (
                             echo .NET est déjà installé
                         ) else (
-                            echo .NET n'est pas installé
-                            exit 1
+                            echo Installation de .NET...
+                            powershell -Command "Invoke-WebRequest -Uri https://dot.net/v1/dotnet-install.ps1 -OutFile dotnet-install.ps1"
+                            powershell -Command "& {./dotnet-install.ps1 -Channel LTS}"
+                            setx PATH "%USERPROFILE%\\.dotnet;%PATH%"
+                            dotnet --version
+                            echo .NET installé avec succès
                         )
                         '''
                     }
