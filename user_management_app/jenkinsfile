@@ -1,14 +1,35 @@
 pipeline {
-    agent {
-        docker {
-            image 'mcr.microsoft.com/dotnet/sdk:8.0'
-            args '-v /var/jenkins_home:/var/jenkins_home'
-        }
+    agent any
+    
+    environment {
+        DOTNET_ROOT = '/usr/share/dotnet'
+        PATH = "${env.DOTNET_ROOT}:${env.PATH}"
     }
+    
     stages {
+        stage('Installation Dépendances') {
+            steps {
+                script {
+                    sh '''
+                        # Mettre à jour et installer les dépendances
+                        apt-get update
+                        apt-get install -y wget libicu-dev
+                        
+                        # Télécharger .NET
+                        wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+                        dpkg -i packages-microsoft-prod.deb
+                        apt-get update
+                        apt-get install -y dotnet-sdk-8.0
+                        
+                        # Vérifier l'installation
+                        dotnet --version
+                    '''
+                }
+            }
+        }
+        
         stage('Build') {
             steps {
-                sh 'dotnet --version'
                 sh 'dotnet build'
             }
         }
