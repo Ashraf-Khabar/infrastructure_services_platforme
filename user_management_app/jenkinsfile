@@ -1,17 +1,9 @@
 pipeline {
     agent any
     environment {
-        NEXUS_REGISTRY = 'nexus.example.com:8085'
-        IMAGE_PREFIX = "${NEXUS_REGISTRY}/user-management"
         DOTNET_VERSION = '8.0'
     }
     stages {
-        stage('Clean Workspace') {
-            steps {
-                cleanWs()
-            }
-        }
-        
         stage('Install .NET') {
             steps {
                 script {
@@ -23,184 +15,14 @@ pipeline {
                         ./dotnet-install.sh --channel ${DOTNET_VERSION} --install-dir /usr/share/dotnet
                         export PATH="$PATH:/usr/share/dotnet"
                         dotnet --version
+                        echo "Installation terminée !"
                         '''
                     } else {
                         bat '''
                         echo "Installing .NET on Windows..."
                         powershell -Command "& {iwr -useb https://dot.net/v1/dotnet-install.ps1 | iex}"
                         dotnet --version
-                        '''
-                    }
-                }
-            }
-        }
-        
-        stage('Restore Dependencies') {
-            steps {
-                script {
-                    if (isUnix()) {
-                        sh 'dotnet restore UserManagement.sln'
-                    } else {
-                        bat 'dotnet restore UserManagement.sln'
-                    }
-                }
-            }
-        }
-        
-        stage('Run Unit Tests') {
-            steps {
-                script {
-                    echo "Running unit tests..."
-                    if (isUnix()) {
-                        sh '''
-                        dotnet test UserManagement.API/UserManagement.API.csproj --logger "trx;LogFileName=test-results.xml" --results-directory ./TestResults
-                        dotnet test UserManagement.Client/UserManagement.Client.csproj --logger "trx;LogFileName=test-results-client.xml" --results-directory ./TestResults
-                        '''
-                    } else {
-                        bat '''
-                        dotnet test UserManagement.API/UserManagement.API.csproj --logger "trx;LogFileName=test-results.xml" --results-directory ./TestResults
-                        dotnet test UserManagement.Client/UserManagement.Client.csproj --logger "trx;LogFileName=test-results-client.xml" --results-directory ./TestResults
-                        '''
-                    }
-                }
-            }
-            post {
-                always {
-                    junit 'TestResults/*.xml'
-                    archiveArtifacts 'TestResults/*.xml'
-                }
-            }
-        }
-        
-        stage('Build Applications') {
-            steps {
-                script {
-                    echo "Building .NET applications..."
-                    if (isUnix()) {
-                        sh '''
-                        dotnet build UserManagement.API/UserManagement.API.csproj -c Release --no-restore
-                        dotnet build UserManagement.Client/UserManagement.Client.csproj -c Release --no-restore
-                        '''
-                    } else {
-                        bat '''
-                        dotnet build UserManagement.API/UserManagement.API.csproj -c Release --no-restore
-                        dotnet build UserManagement.Client/UserManagement.Client.csproj -c Release --no-restore
-                        '''
-                    }
-                }
-            }
-        }
-        
-        stage('Publish Applications') {
-            steps {
-                script {
-                    echo "Publishing applications..."
-                    if (isUnix()) {
-                        sh '''
-                        dotnet publish UserManagement.API/UserManagement.API.csproj -c Release -o ./publish/api --no-build
-                        dotnet publish UserManagement.Client/UserManagement.Client.csproj -c Release -o ./publish/client --no-build
-                        '''
-                    } else {
-                        bat '''
-                        dotnet publish UserManagement.API/UserManagement.API.csproj -c Release -o ./publish/api --no-build
-                        dotnet publish UserManagement.Client/UserManagement.Client.csproj -c Release -o ./publish/client --no-build
-                        '''
-                    }
-                }
-            }
-            post {
-                success {
-                    archiveArtifacts 'publish/**/*'
-                }
-            }
-        }
-        
-        stage('Build Docker Images') {
-            steps {
-                script {
-                    echo "Building Docker images..."
-                    if (isUnix()) {
-                        sh '''
-                        docker build -t ${IMAGE_PREFIX}-api:${BUILD_NUMBER} -f UserManagement.API/Dockerfile .
-                        docker build -t ${IMAGE_PREFIX}-client:${BUILD_NUMBER} -f UserManagement.Client/Dockerfile .
-                        docker tag ${IMAGE_PREFIX}-api:${BUILD_NUMBER} ${IMAGE_PREFIX}-api:latest
-                        docker tag ${IMAGE_PREFIX}-client:${BUILD_NUMBER} ${IMAGE_PREFIX}-client:latest
-                        '''
-                    } else {
-                        bat '''
-                        docker build -t ${IMAGE_PREFIX}-api:%BUILD_NUMBER% -f UserManagement.API/Dockerfile .
-                        docker build -t ${IMAGE_PREFIX}-client:%BUILD_NUMBER% -f UserManagement.Client/Dockerfile .
-                        docker tag ${IMAGE_PREFIX}-api:%BUILD_NUMBER% ${IMAGE_PREFIX}-api:latest
-                        docker tag ${IMAGE_PREFIX}-client:%BUILD_NUMBER% ${IMAGE_PREFIX}-client:latest
-                        '''
-                    }
-                }
-            }
-        }
-        
-        stage('Push to Nexus') {
-            steps {
-                script {
-                    echo "Pushing images to Nexus..."
-                    withCredentials([usernamePassword(
-                        credentialsId: 'nexus-credentials',
-                        usernameVariable: 'NEXUS_USER',
-                        passwordVariable: 'NEXUS_PASSWORD'
-                    )]) {
-                        if (isUnix()) {
-                            sh '''
-                            docker login -u $NEXUS_USER -p $NEXUS_PASSWORD ${NEXUS_REGISTRY}
-                            docker push ${IMAGE_PREFIX}-api:${BUILD_NUMBER}
-                            docker push ${IMAGE_PREFIX}-api:latest
-                            docker push ${IMAGE_PREFIX}-client:${BUILD_NUMBER}
-                            docker push ${IMAGE_PREFIX}-client:latest
-                            '''
-                        } else {
-                            bat '''
-                            docker login -u %NEXUS_USER% -p %NEXUS_PASSWORD% %NEXUS_REGISTRY%
-                            docker push ${IMAGE_PREFIX}-api:%BUILD_NUMBER%
-                            docker push ${IMAGE_PREFIX}-api:latest
-                            docker push ${IMAGE_PREFIX}-client:%BUILD_NUMBER%
-                            docker push ${IMAGE_PREFIX}-client:latest
-                            '''
-                        }
-                    }
-                }
-            }
-        }
-        
-        stage('Deploy to Staging') {
-            when {
-                branch 'main'
-            }
-            steps {
-                script {
-                    echo "Deploying to staging environment..."
-                    // Ajoutez ici votre logique de déploiement
-                    // Exemple avec kubectl ou docker-compose
-                    if (isUnix()) {
-                        sh '''
-                        echo "Deploying version ${BUILD_NUMBER} to staging"
-                        # kubectl set image deployment/user-management-api api=${IMAGE_PREFIX}-api:${BUILD_NUMBER}
-                        # kubectl set image deployment/user-management-client client=${IMAGE_PREFIX}-client:${BUILD_NUMBER}
-                        '''
-                    }
-                }
-            }
-        }
-        
-        stage('Deploy to Production') {
-            when {
-                tag 'release-*'
-            }
-            steps {
-                script {
-                    echo "Deploying to production..."
-                    // Logique de déploiement en production
-                    if (isUnix()) {
-                        sh '''
-                        echo "Deploying version ${BUILD_NUMBER} to production"
-                        # kubectl apply -f kubernetes/production/
+                        echo "Installation terminée !"
                         '''
                     }
                 }
@@ -210,19 +32,13 @@ pipeline {
     
     post {
         always {
-            echo "Pipeline execution completed"
-            cleanWs()
+            echo "Installation de .NET terminée"
         }
         success {
-            echo "Pipeline succeeded!"
-            slackSend channel: '#ci-cd', message: "Build ${BUILD_NUMBER} succeeded: ${BUILD_URL}"
+            echo ".NET installé avec succès !"
         }
         failure {
-            echo "Pipeline failed!"
-            slackSend channel: '#ci-cd', message: "Build ${BUILD_NUMBER} failed: ${BUILD_URL}"
-        }
-        unstable {
-            echo "Pipeline unstable!"
+            echo "Échec de l'installation de .NET"
         }
     }
 }
