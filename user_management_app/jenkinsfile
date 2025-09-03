@@ -1,41 +1,24 @@
-pipeline {
-    agent any
-    
-    environment {
-        DOTNET_ROOT = '/usr/share/dotnet'
-        PATH = "${env.DOTNET_ROOT}:${env.PATH}"
-    }
-    
-    stages {
-        stage('Installation .NET') {
-            steps {
-                script {
-                    sh '''
-                        # Créer le répertoire d'installation
-                        sudo mkdir -p /usr/share/dotnet
-                        sudo chmod 755 /usr/share/dotnet
-                        
-                        # Télécharger le script d'installation .NET
-                        curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-                        chmod +x dotnet-install.sh
-                        
-                        # Installer .NET SDK 8.0
-                        ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
-                        
-                        # Installer libicu-dev (nécessaire pour .NET)
-                        sudo apt-get update && sudo apt-get install -y libicu-dev || echo "Installation ICU optionnelle"
-                        
-                        # Vérifier l'installation
-                        /usr/share/dotnet/dotnet --version
-                    '''
-                }
-            }
-        }
-        
-        stage('Build') {
-            steps {
-                sh '/usr/share/dotnet/dotnet build'
-            }
+stage('Installation .NET') {
+    steps {
+        script {
+            sh '''
+                # Créer un répertoire dans le home sans sudo
+                mkdir -p ~/.dotnet
+                
+                # Télécharger et installer .NET
+                curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+                chmod +x dotnet-install.sh
+                ./dotnet-install.sh --channel 8.0 --install-dir ~/.dotnet
+                
+                # Configurer le PATH
+                echo "export DOTNET_ROOT=~/.dotnet" >> ~/.bashrc
+                echo "export PATH=\\$PATH:~/.dotnet" >> ~/.bashrc
+                export DOTNET_ROOT=~/.dotnet
+                export PATH=$PATH:~/.dotnet
+                
+                # Vérifier
+                ~/.dotnet/dotnet --version
+            '''
         }
     }
 }
