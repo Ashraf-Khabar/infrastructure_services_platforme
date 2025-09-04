@@ -1,37 +1,52 @@
 pipeline {
-    agent {
-        label 'dotnet_slave_agent'
-    }
+    agent any
+    
     stages {
-        stage('Update and Install Python') {
+        stage('Install Python') {
             steps {
                 sh '''
                     sudo apt update -y
-                    sudo apt upgrade -y
                     sudo apt install -y python3 python3-pip python3-venv
-                '''
-            }
-        }
-        
-        stage('Verify Installation') {
-            steps {
-                sh '''
                     python3 --version
                     pip3 --version
                 '''
             }
         }
-
-        stage('Set up requirements for API') {
-            dir('UserManagementAPI/api') {
-                sh 'pip3 -r requirements.txt'
+        
+        stage('Install Dependencies') {
+            steps {
+                sh '''
+                    # API dependencies
+                    pip3 install fastapi uvicorn sqlalchemy
+                    
+                    # Client dependencies  
+                    pip3 install flask requests
+                    
+                    # Test dependencies
+                    pip3 install pytest
+                '''
+            }
+        }
+        
+        stage('Run Tests') {
+            steps {
+                sh '''
+                    # Exécuter les tests
+                    if [ -f "tests/test_api.py" ]; then
+                        python3 -m pytest tests/test_api.py -v
+                    fi
+                    
+                    if [ -f "tests/test_models.py" ]; then
+                        python3 -m pytest tests/test_models.py -v
+                    fi
+                '''
             }
         }
     }
     
     post {
         always {
-            echo 'Python installation process completed'
+            echo 'Python application build completed'
         }
     }
 }
