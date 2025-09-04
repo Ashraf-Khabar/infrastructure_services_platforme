@@ -2,70 +2,66 @@ pipeline {
     agent any
     
     stages {
-        stage('Installation de Python 3.9') {
+        stage('Vérification des outils disponibles') {
             steps {
-                script {
-                    echo "🐍 Installation de Python 3.9 depuis les sources..."
-                    
-                    sh '''
-                        # Étape 1: Vérifier si Python est déjà installé
-                        if command -v python3.9 >/dev/null 2>&1; then
-                            echo "✅ Python 3.9 est déjà installé"
-                            python3.9 --version
-                            exit 0
-                        fi
-                        
-                        # Étape 2: Créer un répertoire d'installation
-                        PYTHON_DIR="$HOME/python-3.9"
-                        mkdir -p $PYTHON_DIR
-                        cd $PYTHON_DIR
-                        
-                        # Étape 3: Télécharger Python 3.9
-                        echo "📦 Téléchargement de Python 3.9..."
-                        wget https://www.python.org/ftp/python/3.9.18/Python-3.9.18.tgz
-                        
-                        # Étape 4: Extraire
-                        tar -xzf Python-3.9.18.tgz
-                        cd Python-3.9.18
-                        
-                        # Étape 5: Configurer pour installation locale
-                        echo "⚙️ Configuration de l'installation..."
-                        ./configure --prefix=$PYTHON_DIR --enable-optimizations
-                        
-                        # Étape 6: Compiler (cela peut prendre du temps)
-                        echo "🔨 Compilation en cours..."
-                        make -j $(nproc)
-                        
-                        # Étape 7: Installer localement
-                        echo "📦 Installation..."
-                        make install
-                        
-                        # Étape 8: Ajouter au PATH
-                        export PATH="$PYTHON_DIR/bin:$PATH"
-                        echo 'export PATH="$HOME/python-3.9/bin:$PATH"' >> ~/.bashrc
-                        echo 'export PATH="$HOME/python-3.9/bin:$PATH"' >> ~/.profile
-                        
-                        # Étape 9: Vérification
-                        echo "✅ Vérification..."
-                        $PYTHON_DIR/bin/python3.9 --version
-                        
-                        echo "🎉 Python 3.9 installé avec succès dans: $PYTHON_DIR"
-                    '''
-                }
+                sh '''
+                    echo "🔍 Vérification des outils disponibles..."
+                    echo "curl: $(which curl || echo 'non disponible')"
+                    echo "wget: $(which wget || echo 'non disponible')"
+                    echo "python: $(which python || echo 'non disponible')"
+                    echo "python3: $(which python3 || echo 'non disponible')"
+                    echo "apt-get: $(which apt-get || echo 'non disponible')"
+                '''
             }
         }
         
-        stage('Configuration du PATH') {
+        stage('Installation de Python sans wget') {
             steps {
-                sh '''
-                    # Configurer le PATH pour cette session
-                    export PATH="$HOME/python-3.9/bin:$PATH"
+                script {
                     
-                    echo "=== VÉRIFICATION ==="
-                    echo "Python: $(python3.9 --version)"
-                    echo "Pip: $(python3.9 -m pip --version)"
-                    echo "Emplacement: $(which python3.9)"
-                '''
+                    sh '''
+                        # Méthode 1: Utiliser curl si disponible
+                        if command -v curl >/dev/null 2>&1; then
+                            echo "Téléchargement avec curl..."
+                            curl -o Python-3.9.18.tgz https://www.python.org/ftp/python/3.9.18/Python-3.9.18.tgz
+                        
+                        # Méthode 2: Vérifier si Python est déjà disponible
+                        elif command -v python3 >/dev/null 2>&1; then
+                            echo "Python3 est déjà disponible: $(python3 --version)"
+                            exit 0
+                            
+                        # Méthode 3: Vérifier dans les emplacements communs
+                        elif [ -f "/usr/bin/python3" ]; then
+                            echo "Python3 trouvé dans /usr/bin/python3"
+                            ln -s /usr/bin/python3 /usr/local/bin/python
+                            python3 --version
+                            exit 0
+                            
+                        else
+                            echo "Aucun outil de téléchargement disponible"
+                            echo "Python pourrait être déjà installé ailleurs..."
+                            
+                            # Chercher Python dans les emplacements communs
+                            find /usr -name "python*" 2>/dev/null | head -5 || echo "Python non trouvé"
+                            exit 1
+                        fi
+                        
+                        # Extraire et compiler si le téléchargement a réussi
+                        if [ -f "Python-3.9.18.tgz" ]; then
+                            echo "Extraction de Python..."
+                            tar -xzf Python-3.9.18.tgz
+                            cd Python-3.9.18
+                            
+                            echo "Compilation..."
+                            ./configure --prefix=$HOME/python --enable-optimizations
+                            make
+                            make install
+                            
+                            echo "Python installé dans: $HOME/python"
+                            $HOME/python/bin/python3.9 --version
+                        fi
+                    '''
+                }
             }
         }
     }
