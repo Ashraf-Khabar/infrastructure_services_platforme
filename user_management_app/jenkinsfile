@@ -3,11 +3,29 @@ pipeline {
         label 'dotnet_slave_agent'
     }
     stages {
-        stage('Update Packages') {
+        stage('Update and Install Python') {
             steps {
-                sh 'sudo apt update -y'
-                sh 'sudo apt upgrade -y'
+                sh '''
+                    sudo apt update -y
+                    sudo apt upgrade -y
+                    sudo apt install -y python3 python3-pip python3-venv
+                '''
             }
+        }
+        
+        stage('Verify Installation') {
+            steps {
+                sh '''
+                    python3 --version
+                    pip3 --version
+                '''
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo 'Python installation process completed'
         }
     }
 }
