@@ -1,16 +1,13 @@
 pipeline {
     agent any
-    
     stages {
-        stage('Use Compiled Python') {
+        stage('Build') {
             steps {
-                sh '''
-                    # Utiliser le Python compilé directement
-                    ./Python-3.9.18/python --version || ./Python-3.9.18/python3 --version
-                    
-                    # Installer pip si nécessaire
-                    ./Python-3.9.18/python -m ensurepip --upgrade || ./Python-3.9.18/python3 -m ensurepip --upgrade
-                '''
+                // Au lieu de sudo apt update
+                sh 'apt update'
+                
+                // Ou utiliser le chemin complet avec permissions
+                sh '/usr/bin/apt update'
             }
         }
     }
