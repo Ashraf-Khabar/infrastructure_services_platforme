@@ -2,67 +2,136 @@ pipeline {
     agent any
     
     stages {
-        stage('Vérification des outils disponibles') {
-            steps {
-                sh '''
-                    echo "🔍 Vérification des outils disponibles..."
-                    echo "curl: $(which curl || echo 'non disponible')"
-                    echo "wget: $(which wget || echo 'non disponible')"
-                    echo "python: $(which python || echo 'non disponible')"
-                    echo "python3: $(which python3 || echo 'non disponible')"
-                    echo "apt-get: $(which apt-get || echo 'non disponible')"
-                '''
-            }
-        }
-        
-        stage('Installation de Python sans wget') {
+        stage('Installation des outils de compilation') {
             steps {
                 script {
+                    echo "🔧 Installation des outils de développement..."
                     
                     sh '''
-                        # Méthode 1: Utiliser curl si disponible
-                        if command -v curl >/dev/null 2>&1; then
-                            echo "Téléchargement avec curl..."
-                            curl -o Python-3.9.18.tgz https://www.python.org/ftp/python/3.9.18/Python-3.9.18.tgz
+                        # Essayer d'installer les outils de compilation
+                        echo "Recherche d'un gestionnaire de paquets..."
                         
-                        # Méthode 2: Vérifier si Python est déjà disponible
-                        elif command -v python3 >/dev/null 2>&1; then
-                            echo "Python3 est déjà disponible: $(python3 --version)"
-                            exit 0
+                        # Essayer apt-get (Debian/Ubuntu)
+                        if command -v apt-get >/dev/null 2>&1; then
+                            echo "📦 Utilisation de apt-get..."
+                            apt-get update
+                            apt-get install -y build-essential libssl-dev zlib1g-dev \
+                            libbz2-dev libreadline-dev libsqlite3-dev wget curl \
+                            libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
+                            libffi-dev liblzma-dev
                             
-                        # Méthode 3: Vérifier dans les emplacements communs
-                        elif [ -f "/usr/bin/python3" ]; then
-                            echo "Python3 trouvé dans /usr/bin/python3"
-                            ln -s /usr/bin/python3 /usr/local/bin/python
-                            python3 --version
-                            exit 0
+                        # Essayer yum (RedHat/CentOS)
+                        elif command -v yum >/dev/null 2>&1; then
+                            echo "📦 Utilisation de yum..."
+                            yum groupinstall -y "Development Tools"
+                            yum install -y zlib-devel bzip2-devel openssl-devel \
+                            ncurses-devel sqlite-devel readline-devel tk-devel \
+                            libffi-devel xz-devel
+                            
+                        # Essayer apk (Alpine)
+                        elif command -v apk >/dev/null 2>&1; then
+                            echo "📦 Utilisation de apk..."
+                            apk add --no-cache build-base libffi-dev zlib-dev \
+                            bzip2-dev readline-dev sqlite-dev openssl-dev \
+                            ncurses-dev tk-dev xz-dev
                             
                         else
-                            echo "Aucun outil de téléchargement disponible"
-                            echo "Python pourrait être déjà installé ailleurs..."
+                            echo "❌ Aucun gestionnaire de paquets trouvé"
+                            echo "Vérification des compilateurs existants..."
                             
-                            # Chercher Python dans les emplacements communs
-                            find /usr -name "python*" 2>/dev/null | head -5 || echo "Python non trouvé"
-                            exit 1
-                        fi
-                        
-                        # Extraire et compiler si le téléchargement a réussi
-                        if [ -f "Python-3.9.18.tgz" ]; then
-                            echo "Extraction de Python..."
-                            tar -xzf Python-3.9.18.tgz
-                            cd Python-3.9.18
-                            
-                            echo "Compilation..."
-                            ./configure --prefix=$HOME/python --enable-optimizations
-                            make
-                            make install
-                            
-                            echo "Python installé dans: $HOME/python"
-                            $HOME/python/bin/python3.9 --version
+                            # Vérifier si gcc ou cc sont déjà installés
+                            if command -v gcc >/dev/null 2>&1; then
+                                echo "✅ gcc trouvé: $(gcc --version | head -1)"
+                            elif command -v cc >/dev/null 2>&1; then
+                                echo "✅ cc trouvé: $(cc --version | head -1)"
+                            else
+                                echo "❌ Aucun compilateur trouvé"
+                                exit 1
+                            fi
                         fi
                     '''
                 }
             }
         }
+        
+        stage('Vérification du compilateur') {
+            steps {
+                sh '''
+                    echo "🔍 Vérification des outils de compilation..."
+                    echo "gcc: $(which gcc || echo 'non disponible')"
+                    echo "make: $(which make || echo 'non disponible')"
+                    
+                    # Test simple de compilation
+                    if command -v gcc >/dev/null 2>&1; then
+                        echo "🧪 Test de compilation..."
+                        echo "#include <stdio.h>\nint main() { printf(\"Hello!\\n\"); return 0; }" > test.c
+                        gcc test.c -o test && ./test && rm test.c test
+                        echo "✅ Compilation réussie!"
+                    fi
+                '''
+            }
+        }
+        
+        stage('Compilation de Python') {
+            steps {
+                script {
+                    echo "🐍 Compilation de Python 3.9..."
+                    
+                    sh '''
+                        # Télécharger Python si pas déjà fait
+                        if [ ! -f "Python-3.9.18.tgz" ]; then
+                            echo "📦 Téléchargement de Python..."
+                            curl -o Python-3.9.18.tgz https://www.python.org/ftp/python/3.9.18/Python-3.9.18.tgz
+                        fi
+                        
+                        # Extraire
+                        echo "📦 Extraction..."
+                        tar -xzf Python-3.9.18.tgz
+                        cd Python-3.9.18
+                        
+                        # Configuration
+                        echo "⚙️ Configuration..."
+                        ./configure --prefix=$HOME/python --enable-optimizations
+                        
+                        # Compilation (peut prendre 10-20 minutes)
+                        echo "🔨 Compilation en cours..."
+                        make -j $(nproc 2>/dev/null || echo 2)
+                        
+                        # Installation
+                        echo "📦 Installation..."
+                        make install
+                        
+                        # Vérification
+                        echo "✅ Vérification..."
+                        export PATH="$HOME/python/bin:$PATH"
+                        $HOME/python/bin/python3.9 --version
+                        $HOME/python/bin/pip3.9 --version
+                        
+                        echo "🎉 Python 3.9 installé avec succès!"
+                    '''
+                }
+            }
+        }
+        
+        stage('Configuration finale') {
+            steps {
+                sh '''
+                    # Configurer le PATH pour les stages suivants
+                    export PATH="$HOME/python/bin:$PATH"
+                    echo 'export PATH="$HOME/python/bin:$PATH"' >> $HOME/.bashrc
+                    
+                    echo "=== CONFIGURATION FINALE ==="
+                    echo "Python: $(python3.9 --version)"
+                    echo "Pip: $(pip3.9 --version)"
+                    echo "Emplacement: $(which python3.9)"
+                    echo "PATH mis à jour: $PATH"
+                '''
+            }
+        }
+    }
+    
+    environment {
+        // Cette variable sera disponible dans tous les stages
+        PATH = "$HOME/python/bin:${env.PATH}"
     }
 }
