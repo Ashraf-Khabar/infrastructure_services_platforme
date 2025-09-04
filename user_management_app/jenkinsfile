@@ -1,6 +1,6 @@
 pipeline {
     agent {
-        label 'dotnet_slave_agent'
+        label 'python_slave_agent'
     }
     stages {
         stage('Update Packages') {
