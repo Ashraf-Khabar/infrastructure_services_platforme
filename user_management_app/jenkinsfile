@@ -1,138 +1,81 @@
 pipeline {
-    agent {
-        docker {
-            image 'python:3.9-slim'
-        }
+    agent any
+    
+    environment {
+        VENV_PATH = "${WORKSPACE}/venv"
+        PATH = "${env.VENV_PATH}/bin:${env.PATH}"
     }
     
     stages {
-        stage('Vérification de l\'environnement') {
+        stage('Setup Python') {
             steps {
-                script {
-                    sh '''
-                        echo "=== ENVIRONNEMENT ==="
-                        python --version
-                        pip --version
-                        uname -a
-                    '''
-                }
+                sh '''
+                    # Installation de Python et création de l'environnement virtuel
+                    python3 -m venv ${VENV_PATH}
+                    source ${VENV_PATH}/bin/activate
+                    pip install --upgrade pip
+                    
+                    # Installation des dépendances système pour psycopg2
+                    sudo apt-get update
+                    sudo apt-get install -y libpq-dev
+                '''
             }
         }
         
-        stage('Installation des dépendances') {
+        stage('Install Dependencies') {
             steps {
-                script {
-                    sh '''
-                        pip install --upgrade pip
-                        
-                        # Installer les dépendances de l'API
-                        cd api && pip install -r requirements.txt && cd ..
-                        
-                        # Installer les dépendances du client
-                        cd client && pip install -r requirements.txt && cd ..
-                        
-                        # Installer pytest pour les tests
-                        pip install pytest requests
-                    '''
-                }
+                sh '''
+                    source ${VENV_PATH}/bin/activate
+                    
+                    # Installation des dépendances API et Client
+                    pip install -r api/requirements.txt
+                    pip install -r client/requirements.txt
+                    pip install pytest requests
+                '''
             }
         }
         
-        stage('Tests unitaires') {
+        stage('Run Tests') {
             steps {
-                script {
-                    sh '''
-                        echo "=== LANCEMENT DES TESTS ==="
-                        python -m pytest tests/ -v --junitxml=test-results.xml
-                    '''
-                }
-            }
-            post {
-                always {
-                    junit 'test-results.xml'
-                }
+                sh '''
+                    source ${VENV_PATH}/bin/activate
+                    cd tests
+                    python -m pytest -v
+                '''
             }
         }
         
-        stage('Validation du code') {
+        stage('Build Docker Images') {
             steps {
-                script {
-                    sh '''
-                        echo "=== VALIDATION DU CODE ==="
-                        
-                        # Vérifier la syntaxe Python
-                        echo "Vérification syntaxe API..."
-                        python -m py_compile api/*.py
-                        python -m py_compile api/routes/*.py
-                        
-                        echo "Vérification syntaxe Client..."
-                        python -m py_compile client/*.py
-                        
-                        echo "Vérification syntaxe Tests..."
-                        python -m py_compile tests/*.py
-                        
-                        # Vérifier les imports
-                        echo "Vérification des imports..."
-                        python -c "
-                        try:
-                            from fastapi import FastAPI
-                            from pydantic import BaseModel
-                            import requests
-                            import hashlib
-                            print('Tous les imports fonctionnent')
-                        except ImportError as e:
-                            print(f'Import error: {e}')
-                            exit(1)
-                        "
-                    '''
-                }
+                sh '''
+                    docker-compose build --no-cache
+                '''
             }
         }
         
-        stage('Build et Test Docker (Simulation)') {
+        stage('Integration Tests') {
             steps {
-                script {
-                    sh '''
-                        echo "=== SIMULATION DOCKER ==="
-                        echo "Cette étape simule le build Docker qui serait fait ailleurs"
-                        
-                        # Vérifier que les Dockerfiles existent
-                        if [ -f "api/Dockerfile" ] && [ -f "client/Dockerfile" ]; then
-                            echo "Dockerfiles présents"
-                            
-                            # Vérifier le contenu des Dockerfiles
-                            echo "=== CONTENU DOCKERFILE API ==="
-                            head -n 10 api/Dockerfile
-                            
-                            echo "=== CONTENU DOCKERFILE CLIENT ==="
-                            head -n 10 client/Dockerfile
-                            
-                        else
-                            echo "Dockerfiles manquants"
-                            exit 1
-                        fi
-                    '''
-                }
+                sh '''
+                    # Démarrage des services
+                    docker-compose up -d
+                    
+                    # Attente du démarrage
+                    sleep 20
+                    
+                    # Tests d'intégration
+                    curl -f http://localhost:5002/health || exit 1
+                    curl -f http://localhost:5002/users/ || exit 1
+                    
+                    # Nettoyage
+                    docker-compose down
+                '''
             }
         }
     }
     
     post {
         always {
-            archiveArtifacts artifacts: 'test-results.xml', allowEmptyArchive: true
+            sh 'docker-compose down 2>/dev/null || true'
         }
-        
-        success {
-            echo "Build Python réussi !"
-            echo "Note: Le build Docker nécessite un agent avec Docker installé"
-        }
-        
-        failure {
-            echo "Build échoué !"
-        }
-    }
-    
-    options {
-        timeout(time: 15, unit: 'MINUTES')
     }
 }
