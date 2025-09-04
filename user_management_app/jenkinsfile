@@ -125,7 +125,7 @@ pipeline {
                     rm -f ${API_PID_FILE} 2>/dev/null || true
                 """
                 
-                // Envoyer l'email de notification
+                // Envoyer l'email de notification (version simplifiée)
                 emailext (
                     subject: "Build ${BUILD_STATUS}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
                     body: """
@@ -136,10 +136,8 @@ pipeline {
                         <p><strong>Durée:</strong> ${currentBuild.durationString}</p>
                         <p><strong>URL du build:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
                         
-                        <h3>Détails des stages:</h3>
-                        <ul>
-                        ${getBuildStagesSummary()}
-                        </ul>
+                        <h3>Résumé des tests:</h3>
+                        <p>Consultez les logs détaillés dans Jenkins pour plus d'informations.</p>
                         
                         <p>Consultez MailHog pour voir cet email: http://mail.host.internal:8025</p>
                     """,
@@ -162,13 +160,4 @@ pipeline {
             echo "Build instable - Email de notification envoyé"
         }
     }
-}
-
-def getBuildStagesSummary() {
-    def summary = ""
-    currentBuild.rawBuild.getStages().each { stage ->
-        def status = stage.getStatus().toString().toLowerCase()
-        summary += "<li><strong>${stage.getName()}:</strong> <span style='color: ${status == 'success' ? 'green' : status == 'failure' ? 'red' : 'orange'}'>${status}</span></li>"
-    }
-    return summary
 }
