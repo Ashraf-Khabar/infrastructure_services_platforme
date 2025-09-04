@@ -7,67 +7,155 @@ pipeline {
     }
     
     stages {
-        stage('Setup Python') {
+        stage('Install Python') {
+            steps {
+                script {
+                    echo "Installation de Python 3 et des dépendances système..."
+                    
+                    sh '''
+                        # Mise à jour des paquets et installation de Python 3
+                        sudo apt-get update
+                        sudo apt-get install -y python3 python3-venv python3-pip
+                        
+                        # Vérification de l'installation
+                        python3 --version
+                        pip3 --version
+                    '''
+                }
+            }
+        }
+        
+        stage('Create Virtual Environment') {
             steps {
                 sh '''
-                    # Installation de Python et création de l'environnement virtuel
+                    # Création de l'environnement virtuel
                     python3 -m venv ${VENV_PATH}
+                    
+                    # Activation et mise à jour de pip
                     source ${VENV_PATH}/bin/activate
                     pip install --upgrade pip
-                    
-                    # Installation des dépendances système pour psycopg2
-                    sudo apt-get update
-                    sudo apt-get install -y libpq-dev
                 '''
             }
         }
         
-        stage('Install Dependencies') {
+        stage('Install System Dependencies') {
+            steps {
+                sh '''
+                    # Installation des dépendances système pour PostgreSQL
+                    sudo apt-get install -y libpq-dev gcc
+                '''
+            }
+        }
+        
+        stage('Install Python Dependencies') {
             steps {
                 sh '''
                     source ${VENV_PATH}/bin/activate
                     
-                    # Installation des dépendances API et Client
-                    pip install -r api/requirements.txt
-                    pip install -r client/requirements.txt
+                    # Installation des dépendances API
+                    echo "Installation des dépendances API..."
+                    cd api
+                    pip install -r requirements.txt
+                    
+                    # Installation des dépendances Client
+                    echo "Installation des dépendances Client..."
+                    cd ../client
+                    pip install -r requirements.txt
+                    
+                    # Installation de pytest pour les tests
+                    echo "Installation de pytest..."
                     pip install pytest requests
                 '''
             }
         }
         
-        stage('Run Tests') {
+        stage('Run Unit Tests') {
             steps {
                 sh '''
                     source ${VENV_PATH}/bin/activate
+                    echo "Exécution des tests unitaires..."
+                    
+                    # Exécution des tests
                     cd tests
-                    python -m pytest -v
+                    python -m pytest -v --tb=short
                 '''
+            }
+            post {
+                always {
+                    junit '**/test-reports/*.xml'  // Si vous configurez pytest pour générer des rapports JUnit
+                }
             }
         }
         
         stage('Build Docker Images') {
             steps {
                 sh '''
+                    echo "Construction des images Docker..."
                     docker-compose build --no-cache
+                    
+                    # Vérification des images construites
+                    docker images | grep user-management || true
                 '''
             }
         }
         
         stage('Integration Tests') {
             steps {
+                script {
+                    echo "Lancement des tests d'intégration..."
+                    
+                    sh '''
+                        # Démarrage des services en arrière-plan
+                        docker-compose up -d
+                        
+                        # Attente que les services démarrent
+                        echo "Attente du démarrage des services..."
+                        sleep 30
+                        
+                        # Test de santé de l'API
+                        echo "Test de santé de l'API..."
+                        if curl -f http://localhost:5002/health; then
+                            echo "✓ API health check réussi"
+                        else
+                            echo "✗ API health check échoué"
+                            exit 1
+                        fi
+                        
+                        # Test des utilisateurs
+                        echo "Test des endpoints utilisateurs..."
+                        if curl -f http://localhost:5002/users/; then
+                            echo "✓ Endpoint users réussi"
+                        else
+                            echo "✗ Endpoint users échoué"
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+            post {
+                always {
+                    sh '''
+                        # Arrêt des services
+                        echo "Nettoyage des services Docker..."
+                        docker-compose down
+                    '''
+                }
+            }
+        }
+        
+        stage('Code Quality Check') {
+            steps {
                 sh '''
-                    # Démarrage des services
-                    docker-compose up -d
+                    source ${VENV_PATH}/bin/activate
                     
-                    # Attente du démarrage
-                    sleep 20
+                    # Vérification de la syntaxe Python
+                    echo "Vérification de la syntaxe Python..."
+                    python -m py_compile api/app.py && echo "✓ API syntaxe OK"
+                    python -m py_compile client/app.py && echo "✓ Client syntaxe OK"
                     
-                    # Tests d'intégration
-                    curl -f http://localhost:5002/health || exit 1
-                    curl -f http://localhost:5002/users/ || exit 1
-                    
-                    # Nettoyage
-                    docker-compose down
+                    # Vérification des imports
+                    echo "Vérification des imports..."
+                    python -c "import fastapi; import flask; import sqlalchemy; print('✓ Tous les imports fonctionnent')"
                 '''
             }
         }
@@ -75,7 +163,37 @@ pipeline {
     
     post {
         always {
-            sh 'docker-compose down 2>/dev/null || true'
+            script {
+                echo "Nettoyage final..."
+                sh '''
+                    # Arrêt des services Docker s'ils sont encore en cours
+                    docker-compose down 2>/dev/null || true
+                    
+                    # Nettoyage Docker
+                    docker system prune -f 2>/dev/null || true
+                    
+                    # Affichage de l'espace disque
+                    df -h
+                '''
+                
+                // Archivage des logs
+                archiveArtifacts artifacts: '**/*.log', allowEmptyArchive: true
+            }
+        }
+        
+        success {
+            echo '✅ Pipeline exécuté avec succès!'
+            // slackSend color: 'good', message: "Build ${env.JOB_NAME} #${env.BUILD_NUMBER} réussi"
+        }
+        
+        failure {
+            echo '❌ Pipeline a échoué!'
+            // slackSend color: 'danger', message: "Build ${env.JOB_NAME} #${env.BUILD_NUMBER} échoué"
+        }
+        
+        unstable {
+            echo '⚠️ Pipeline instable!'
+            // slackSend color: 'warning', message: "Build ${env.JOB_NAME} #${env.BUILD_NUMBER} instable"
         }
     }
 }
