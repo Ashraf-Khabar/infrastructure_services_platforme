@@ -21,6 +21,12 @@ pipeline {
                 '''
             }
         }
+
+        stage('Set up requirements for API') {
+            dir('UserManagementAPI/api') {
+                sh 'pip3 -r requirements.txt'
+            }
+        }
     }
     
     post {
