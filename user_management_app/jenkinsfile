@@ -169,6 +169,6 @@ pipeline {
     }
     
     triggers {
-        pollSCM('H/5 * * * *')
+        pollSCM('H/5 * * * *') // Vérifier les changements toutes les 5 minutes
     }
 }
