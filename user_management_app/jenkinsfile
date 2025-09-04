@@ -12,7 +12,9 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                sh 'ls -li'
+                dir('user_management_app/api'){
+                    sh 'ls -li'
+                }  
             }
         }
     }
