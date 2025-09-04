@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - User Management{% endblock %}
+
+{% block content %}
+<div class="container-fluid fade-in">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <!-- Header -->
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1 class="h2 text-light">
+                    <i class="bi bi-person-circle text-primary"></i> User Profile
+                </h1>
+                <span class="badge bg-{{ 'danger' if user.role == 'admin' else 'primary' }}">
+                    {{ user.role|upper }}
+                </span>
+            </div>
+
+            <!-- Profile Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-info-circle"></i> Personal Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3 text-center mb-4">
+                            <div class="avatar-lg bg-primary rounded-circle d-flex align-items-center justify-content-center mx-auto mb-3"
+                                 style="width: 120px; height: 120px;">
+                                <span class="text-white display-4 fw-bold">{{ user.username[0]|upper }}</span>
+                            </div>
+                            <h5 class="text-light">{{ user.username }}</h5>
+                            <span class="badge bg-{{ 'success' if user.is_active else 'secondary' }}">
+                                {{ 'ACTIVE' if user.is_active else 'INACTIVE' }}
+                            </span>
+                        </div>
+
+                        <div class="col-md-9">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-muted">Username</label>
+                                    <div class="form-control bg-dark text-light">{{ user.username }}</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-muted">Email Address</label>
+                                    <div class="form-control bg-dark text-light">{{ user.email }}</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-muted">First Name</label>
+                                    <div class="form-control bg-dark text-light">{{ user.first_name or 'Not set' }}</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-muted">Last Name</label>
+                                    <div class="form-control bg-dark text-light">{{ user.last_name or 'Not set' }}</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-muted">User Role</label>
+                                    <div class="form-control bg-dark text-light">
+                                        <span class="badge bg-{{ 'danger' if user.role == 'admin' else 'primary' }}">
+                                            {{ user.role|upper }}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-muted">Status</label>
+                                    <div class="form-control bg-dark text-light">
+                                        <span class="badge bg-{{ 'success' if user.is_active else 'secondary' }}">
+                                            {{ 'ACTIVE' if user.is_active else 'INACTIVE' }}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-muted">Member Since</label>
+                                    <div class="form-control bg-dark text-light">{{ user.created_at[:10] if user.created_at else 'Unknown' }}</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label text-muted">Last Login</label>
+                                    <div class="form-control bg-dark text-light">{{ login_time[:10] if login_time else 'Today' }}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statistics Card -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-bar-chart"></i> Activity Statistics
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-3 mb-3">
+                            <div class="bg-dark p-3 rounded">
+                                <i class="bi bi-people display-6 text-primary"></i>
+                                <h4 class="text-light mt-2">128</h4>
+                                <small class="text-muted">Total Users Viewed</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="bg-dark p-3 rounded">
+                                <i class="bi bi-clock display-6 text-info"></i>
+                                <h4 class="text-light mt-2">42h</h4>
+                                <small class="text-muted">Active Time</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="bg-dark p-3 rounded">
+                                <i class="bi bi-check-circle display-6 text-success"></i>
+                                <h4 class="text-light mt-2">89%</h4>
+                                <small class="text-muted">Completion Rate</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="bg-dark p-3 rounded">
+                                <i class="bi bi-activity display-6 text-warning"></i>
+                                <h4 class="text-light mt-2">256</h4>
+                                <small class="text-muted">Total Actions</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions Card -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-lightning"></i> Quick Actions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2 d-md-flex">
+                        <button class="btn btn-outline-primary me-md-2">
+                            <i class="bi bi-pencil"></i> Edit Profile
+                        </button>
+                        <button class="btn btn-outline-secondary me-md-2">
+                            <i class="bi bi-key"></i> Change Password
+                        </button>
+                        <button class="btn btn-outline-info">
+                            <i class="bi bi-bell"></i> Notification Settings
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

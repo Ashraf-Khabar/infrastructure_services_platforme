@@ -32,12 +32,10 @@ services:
       retries: 5
     networks:
       - mynet
-  
-  
 
   keycloak:
     image: quay.io/keycloak/keycloak:22.0
-    command: ["start-dev", "--http-port=9091"]  # Changed to 9091
+    command: ["start-dev", "--http-port=9091"]
     environment:
       - KEYCLOAK_ADMIN=admin
       - KEYCLOAK_ADMIN_PASSWORD=admin
@@ -48,13 +46,13 @@ services:
       - KC_DB_USERNAME=sonar
       - KC_DB_PASSWORD=sonar
       - KC_HTTP_ENABLED=true
-      - KC_HTTP_PORT=9091  # Must match the command line port
+      - KC_HTTP_PORT=9091
     volumes:
       - keycloak_data:/opt/keycloak/data
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.keycloak.rule=Host(`keycloak.host.internal`)"
-      - "traefik.http.services.keycloak.loadbalancer.server.port=9091"  # Updated
+      - "traefik.http.services.keycloak.loadbalancer.server.port=9091"
     networks:
       - mynet
     depends_on:
@@ -167,6 +165,29 @@ services:
     networks:
       - mynet
 
+  # Nouveau service pgAdmin pour visualiser les bases de données
+  pgadmin:
+    image: dpage/pgadmin4
+    ports:
+    - "5050:80"  # Exposition directe du port
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pgadmin.rule=Host(`pgadmin.host.internal`)"
+      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+    networks:
+      - mynet
+    depends_on:
+      - db
+      - app-db
+    restart: unless-stopped
+
 networks:
   mynet:
     driver: bridge
@@ -180,3 +201,5 @@ volumes:
   nexus_data:
   keycloak_data:
   app_postgres_data:
+  prometheus_data:
+  pgadmin_data:  # Nouveau volume pour pgAdmin

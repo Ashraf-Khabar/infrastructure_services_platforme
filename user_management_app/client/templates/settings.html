@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - User Management{% endblock %}
+
+{% block content %}
+<div class="container-fluid fade-in">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <!-- Header -->
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1 class="h2 text-light">
+                    <i class="bi bi-gear text-primary"></i> System Settings
+                </h1>
+                <span class="badge bg-info">Administrator</span>
+            </div>
+
+            <!-- Settings Tabs -->
+            <div class="card">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                        <li class="nav-item">
+                            <a class="nav-link active" data-bs-toggle="tab" href="#general">
+                                <i class="bi bi-gear"></i> General
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-bs-toggle="tab" href="#security">
+                                <i class="bi bi-shield"></i> Security
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-bs-toggle="tab" href="#notifications">
+                                <i class="bi bi-bell"></i> Notifications
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" data-bs-toggle="tab" href="#database">
+                                <i class="bi bi-database"></i> Database
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div class="tab-content">
+                        <!-- General Settings -->
+                        <div class="tab-pane fade show active" id="general">
+                            <h5 class="mb-4">General Application Settings</h5>
+                            <form>
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Application Name</label>
+                                        <input type="text" class="form-control bg-dark text-light" value="User Management System">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Theme</label>
+                                        <select class="form-select bg-dark text-light">
+                                            <option selected>Dark Mode</option>
+                                            <option>Light Mode</option>
+                                            <option>Auto (System)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Language</label>
+                                        <select class="form-select bg-dark text-light">
+                                            <option selected>English</option>
+                                            <option>French</option>
+                                            <option>Spanish</option>
+                                            <option>German</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Timezone</label>
+                                        <select class="form-select bg-dark text-light">
+                                            <option selected>UTC</option>
+                                            <option>EST</option>
+                                            <option>PST</option>
+                                            <option>CET</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-12 mb-3">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" checked>
+                                            <label class="form-check-label">Enable animations</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-12 mb-3">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" checked>
+                                            <label class="form-check-label">Show statistics on dashboard</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-check-circle"></i> Save Changes
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- Security Settings -->
+                        <div class="tab-pane fade" id="security">
+                            <h5 class="mb-4">Security Settings</h5>
+                            <form>
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Session Timeout</label>
+                                        <select class="form-select bg-dark text-light">
+                                            <option>15 minutes</option>
+                                            <option>30 minutes</option>
+                                            <option selected>1 hour</option>
+                                            <option>2 hours</option>
+                                            <option>4 hours</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Password Policy</label>
+                                        <select class="form-select bg-dark text-light">
+                                            <option selected>Medium (8+ characters)</option>
+                                            <option>Strong (12+ characters with complexity)</option>
+                                            <option>Very Strong (16+ characters)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-12 mb-3">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" checked>
+                                            <label class="form-check-label">Require two-factor authentication</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-12 mb-3">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox">
+                                            <label class="form-check-label">Enable login notifications</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-12 mb-3">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" checked>
+                                            <label class="form-check-label">Log all user activities</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-shield-check"></i> Update Security
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- Notification Settings -->
+                        <div class="tab-pane fade" id="notifications">
+                            <h5 class="mb-4">Notification Preferences</h5>
+                            <form>
+                                <div class="row">
+                                    <div class="col-12 mb-3">
+                                        <label class="form-label">Email Notifications</label>
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" checked>
+                                            <label class="form-check-label">New user registrations</label>
+                                        </div>
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" checked>
+                                            <label class="form-check-label">System alerts</label>
+                                        </div>
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox">
+                                            <label class="form-check-label">Weekly reports</label>
+                                        </div>
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" checked>
+                                            <label class="form-check-label">Security notifications</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Notification Frequency</label>
+                                        <select class="form-select bg-dark text-light">
+                                            <option selected>Immediately</option>
+                                            <option>Hourly digest</option>
+                                            <option>Daily digest</option>
+                                            <option>Weekly summary</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Preferred Channel</label>
+                                        <select class="form-select bg-dark text-light">
+                                            <option selected>Email</option>
+                                            <option>In-app notification</option>
+                                            <option>Both</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-bell"></i> Save Preferences
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- Database Settings -->
+                        <div class="tab-pane fade" id="database">
+                            <h5 class="mb-4">Database Management</h5>
+                            <div class="row">
+                                <div class="col-md-6 mb-4">
+                                    <div class="card bg-dark">
+                                        <div class="card-body text-center">
+                                            <i class="bi bi-database display-4 text-primary mb-3"></i>
+                                            <h5>Database Backup</h5>
+                                            <p class="text-muted">Last backup: 2 hours ago</p>
+                                            <button class="btn btn-outline-primary">
+                                                <i class="bi bi-download"></i> Backup Now
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 mb-4">
+                                    <div class="card bg-dark">
+                                        <div class="card-body text-center">
+                                            <i class="bi bi-arrow-clockwise display-4 text-info mb-3"></i>
+                                            <h5>Database Status</h5>
+                                            <p class="text-muted">All systems operational</p>
+                                            <button class="btn btn-outline-info">
+                                                <i class="bi bi-activity"></i> Check Status
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <h6 class="mb-3">Database Connections</h6>
+                            <div class="table-responsive">
+                                <table class="table table-dark table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Database</th>
+                                            <th>Status</th>
+                                            <th>Size</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>user_management</td>
+                                            <td><span class="badge bg-success">Online</span></td>
+                                            <td>15.2 MB</td>
+                                            <td>
+                                                <button class="btn btn-sm btn-outline-info">Optimize</button>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td>keycloak</td>
+                                            <td><span class="badge bg-success">Online</span></td>
+                                            <td>128.7 MB</td>
+                                            <td>
+                                                <button class="btn btn-sm btn-outline-info">Optimize</button>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Info Card -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-info-circle"></i> System Information
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <strong class="text-muted">Application Version:</strong>
+                                <span class="text-light">v1.0.0</span>
+                            </div>
+                            <div class="mb-3">
+                                <strong class="text-muted">Python Version:</strong>
+                                <span class="text-light">3.13.5</span>
+                            </div>
+                            <div class="mb-3">
+                                <strong class="text-muted">Server:</strong>
+                                <span class="text-light">Linux/amd64</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <strong class="text-muted">Uptime:</strong>
+                                <span class="text-light">5 days, 12 hours</span>
+                            </div>
+                            <div class="mb-3">
+                                <strong class="text-muted">Memory Usage:</strong>
+                                <span class="text-light">256 MB / 2 GB</span>
+                            </div>
+                            <div class="mb-3">
+                                <strong class="text-muted">CPU Load:</strong>
+                                <span class="text-light">15%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Tab persistence
+document.addEventListener('DOMContentLoaded', function() {
+    const tabs = document.querySelectorAll('a[data-bs-toggle="tab"]');
+    tabs.forEach(tab => {
+        tab.addEventListener('shown.bs.tab', function(e) {
+            localStorage.setItem('activeTab', e.target.getAttribute('href'));
+        });
+    });
+    
+    const activeTab = localStorage.getItem('activeTab');
+    if (activeTab) {
+        const tabElement = document.querySelector(`a[href="${activeTab}"]`);
+        if (tabElement) {
+            new bootstrap.Tab(tabElement).show();
+        }
+    }
+});
+</script>
+{% endblock %}

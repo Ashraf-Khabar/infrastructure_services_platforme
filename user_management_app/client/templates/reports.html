@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+
+{% block title %}Reports - User Management{% endblock %}
+
+{% block content %}
+<div class="container-fluid fade-in">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h2 text-light">
+            <i class="bi bi-graph-up text-primary"></i> Reports & Analytics
+        </h1>
+        <div class="dropdown">
+            <button class="btn btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                <i class="bi bi-download"></i> Export
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end bg-dark border-secondary">
+                <li><a class="dropdown-item text-light" href="#"><i class="bi bi-filetype-pdf"></i> PDF Report</a></li>
+                <li><a class="dropdown-item text-light" href="#"><i class="bi bi-filetype-csv"></i> CSV Data</a></li>
+                <li><a class="dropdown-item text-light" href="#"><i class="bi bi-filetype-xlsx"></i> Excel Sheet</a></li>
+            </ul>
+        </div>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> {{ error }}
+    </div>
+    {% endif %}
+
+    <!-- Stats Overview -->
+    <div class="row mb-4">
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card bg-dark border-primary">
+                <div class="card-body text-center">
+                    <i class="bi bi-people-fill display-4 text-primary mb-2"></i>
+                    <h3 class="text-white">{{ reports.user_activity.active + reports.user_activity.inactive if reports else 0 }}</h3>
+                    <p class="text-muted mb-0">Total Users</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card bg-dark border-success">
+                <div class="card-body text-center">
+                    <i class="bi bi-check-circle display-4 text-success mb-2"></i>
+                    <h3 class="text-white">{{ reports.user_activity.active if reports else 0 }}</h3>
+                    <p class="text-muted mb-0">Active Users</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card bg-dark border-warning">
+                <div class="card-body text-center">
+                    <i class="bi bi-x-circle display-4 text-warning mb-2"></i>
+                    <h3 class="text-white">{{ reports.user_activity.inactive if reports else 0 }}</h3>
+                    <p class="text-muted mb-0">Inactive Users</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card bg-dark border-info">
+                <div class="card-body text-center">
+                    <i class="bi bi-percent display-4 text-info mb-2"></i>
+                    <h3 class="text-white">{{ reports.user_activity.percentage_active|round(1) if reports else 0 }}%</h3>
+                    <p class="text-muted mb-0">Active Rate</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts and Graphs -->
+    <div class="row">
+        <!-- Role Distribution -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-pie-chart"></i> Role Distribution
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if reports.role_distribution %}
+                    <div class="table-responsive">
+                        <table class="table table-hover table-dark">
+                            <thead>
+                                <tr>
+                                    <th>Role</th>
+                                    <th>Count</th>
+                                    <th>Percentage</th>
+                                    <th>Chart</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% set total = reports.role_distribution.values()|sum %}
+                                {% for role, count in reports.role_distribution.items() %}
+                                <tr>
+                                    <td>
+                                        <span class="badge bg-{{ 'danger' if role == 'admin' else 'primary' }}">
+                                            {{ role|upper }}
+                                        </span>
+                                    </td>
+                                    <td>{{ count }}</td>
+                                    <td>{{ ((count / total) * 100)|round(1) }}%</td>
+                                    <td>
+                                        <div class="progress" style="height: 8px;">
+                                            <div class="progress-bar bg-{{ 'danger' if role == 'admin' else 'primary' }}" 
+                                                 style="width: {{ (count / total) * 100 }}%">
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-center text-muted py-4">
+                        <i class="bi bi-pie-chart display-4"></i>
+                        <p class="mt-2">No role distribution data available</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Registration Trends -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-graph-up"></i> Registration Trends
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if reports.registration_trends %}
+                    <div class="text-center">
+                        <h6 class="text-muted mb-3">Last 7 Days</h6>
+                        <div class="d-flex align-items-end justify-content-around mb-4" style="height: 150px;">
+                            {% for count in reports.registration_trends.last_7_days %}
+                            <div class="d-flex flex-column align-items-center">
+                                <div class="bg-primary rounded" style="width: 20px; height: {{ (count / reports.registration_trends.last_7_days|max * 100)|round|int }}px;"></div>
+                                <small class="text-muted mt-1">{{ count }}</small>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        
+                        <h6 class="text-muted mb-3">Last 30 Days Overview</h6>
+                        <div class="progress mb-2" style="height: 20px;">
+                            <div class="progress-bar bg-success" style="width: 65%">
+                                Active: 65%
+                            </div>
+                            <div class="progress-bar bg-warning" style="width: 20%">
+                                Pending: 20%
+                            </div>
+                            <div class="progress-bar bg-secondary" style="width: 15%">
+                                Inactive: 15%
+                            </div>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="text-center text-muted py-4">
+                        <i class="bi bi-graph-up display-4"></i>
+                        <p class="mt-2">No registration trends data available</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detailed Reports -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-table"></i> Detailed User Statistics
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-3 mb-3">
+                            <div class="bg-dark p-3 rounded">
+                                <i class="bi bi-calendar-check display-6 text-success"></i>
+                                <h4 class="text-light mt-2">15</h4>
+                                <small class="text-muted">New Users Today</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="bg-dark p-3 rounded">
+                                <i class="bi bi-calendar-week display-6 text-primary"></i>
+                                <h4 class="text-light mt-2">89</h4>
+                                <small class="text-muted">This Week</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="bg-dark p-3 rounded">
+                                <i class="bi bi-calendar-month display-6 text-info"></i>
+                                <h4 class="text-light mt-2">342</h4>
+                                <small class="text-muted">This Month</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="bg-dark p-3 rounded">
+                                <i class="bi bi-calendar-range display-6 text-warning"></i>
+                                <h4 class="text-light mt-2">1,284</h4>
+                                <small class="text-muted">This Year</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Database Monitoring Section -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-database"></i> Database Monitoring
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-dark">
+                            <thead>
+                                <tr>
+                                    <th>Database</th>
+                                    <th>Status</th>
+                                    <th>Size</th>
+                                    <th>Tables</th>
+                                    <th>Connections</th>
+                                    <th>Uptime</th>
+                                    <th>Health</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>user_management</td>
+                                    <td><span class="badge bg-success">Online</span></td>
+                                    <td>15.2 MB</td>
+                                    <td>8</td>
+                                    <td>12 active</td>
+                                    <td>5d 12h</td>
+                                    <td>
+                                        <div class="progress" style="height: 6px; width: 80px;">
+                                            <div class="progress-bar bg-success" style="width: 95%"></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>keycloak</td>
+                                    <td><span class="badge bg-success">Online</span></td>
+                                    <td>128.7 MB</td>
+                                    <td>42</td>
+                                    <td>8 active</td>
+                                    <td>5d 12h</td>
+                                    <td>
+                                        <div class="progress" style="height: 6px; width: 80px;">
+                                            <div class="progress-bar bg-success" style="width: 88%"></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>sonarqube</td>
+                                    <td><span class="badge bg-warning">Warning</span></td>
+                                    <td>2.1 GB</td>
+                                    <td>156</td>
+                                    <td>23 active</td>
+                                    <td>5d 12h</td>
+                                    <td>
+                                        <div class="progress" style="height: 6px; width: 80px;">
+                                            <div class="progress-bar bg-warning" style="width: 65%"></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
