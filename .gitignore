@@ -14,3 +14,22 @@ dist/
 *.war
 *.iml
 *.pyc       
+
+user_management_app/__pycache__/
+user_management_app/venv/
+internal_apps_monitoring/__pycache__/
+infrastructure_services_platforme/__pycache__/
+security_tools/__pycache__/
+tests/__pycache__/
+__pycache__/
+*.sqlite3
+*.db
+*.sqlite
+*.pem
+
+# Ignore Docker files
+docker-compose.override.yml
+docker-compose.prod.yml
+docker-compose.dev.yml
+docker-compose.test.yml
+docker-compose.staging.yml

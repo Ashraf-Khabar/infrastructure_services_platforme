@@ -1,97 +1,86 @@
 import pytest
-import sys
-import os
-
-# Ajouter le chemin de l'API au PATH
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../api'))
-
-from fastapi.testclient import TestClient
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import List
+import requests
 import hashlib
 
-# Créer une application de test
-app = FastAPI()
+# Tests d'API simples qui utilisent requests au lieu de TestClient
 
-class UserResponse(BaseModel):
-    id: int
-    username: str
-    email: str
-    first_name: str = None
-    last_name: str = None
-    role: str
-    is_active: bool
+def test_api_root():
+    """Test the root endpoint"""
+    try:
+        response = requests.get("http://localhost:5002/", timeout=5)
+        assert response.status_code == 200
+        assert response.json()["message"] == "User Management API is running"
+    except requests.exceptions.ConnectionError:
+        pytest.skip("API not running")
 
-# Données de test
-test_users = [
-    {
-        "id": 1,
-        "username": "admin",
-        "email": "admin@example.com",
-        "password_hash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
-        "first_name": "Admin",
-        "last_name": "User",
-        "role": "admin",
-        "is_active": True
-    }
-]
-
-@app.get("/users/", response_model=List[UserResponse])
-def get_users():
-    users_response = []
-    for user in test_users:
-        users_response.append({
-            "id": user["id"],
-            "username": user["username"],
-            "email": user["email"],
-            "first_name": user["first_name"],
-            "last_name": user["last_name"],
-            "role": user["role"],
-            "is_active": user["is_active"]
-        })
-    return users_response
-
-@app.get("/health")
-def health_check():
-    return {"status": "healthy", "users_count": len(test_users)}
-
-client = TestClient(app)
-
-def test_health_check():
-    """Test du endpoint health check"""
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
-    assert "users_count" in response.json()
+def test_api_health():
+    """Test the health check endpoint"""
+    try:
+        response = requests.get("http://localhost:5002/health", timeout=5)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "healthy"
+    except requests.exceptions.ConnectionError:
+        pytest.skip("API not running")
 
 def test_get_users():
-    """Test de récupération des utilisateurs"""
-    response = client.get("/users/")
-    assert response.status_code == 200
-    assert isinstance(response.json(), list)
-    assert len(response.json()) > 0
+    """Test getting users list"""
+    try:
+        response = requests.get("http://localhost:5002/users/", timeout=5)
+        assert response.status_code == 200
+        users = response.json()
+        assert isinstance(users, list)
+        # Vérifier que l'utilisateur admin existe
+        admin_user = next((u for u in users if u['username'] == 'admin'), None)
+        assert admin_user is not None
+    except requests.exceptions.ConnectionError:
+        pytest.skip("API not running")
 
-def test_user_structure():
-    """Test de la structure des données utilisateur"""
-    response = client.get("/users/")
-    users = response.json()
-    
-    assert "id" in users[0]
-    assert "username" in users[0]
-    assert "email" in users[0]
-    assert "role" in users[0]
-    assert "is_active" in users[0]
+def test_create_user():
+    """Test creating a new user"""
+    try:
+        user_data = {
+            "username": "testuser",
+            "email": "test@example.com",
+            "password": "testpassword",
+            "first_name": "Test",
+            "last_name": "User",
+            "role": "user"
+        }
+        
+        response = requests.post("http://localhost:5002/users/", json=user_data, timeout=5)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["username"] == "testuser"
+        assert data["email"] == "test@example.com"
+    except requests.exceptions.ConnectionError:
+        pytest.skip("API not running")
 
-def test_admin_user_exists():
-    """Test que l'utilisateur admin existe"""
-    response = client.get("/users/")
-    users = response.json()
-    
-    admin_users = [u for u in users if u["username"] == "admin"]
-    assert len(admin_users) == 1
-    assert admin_users[0]["role"] == "admin"
+def test_login_success():
+    """Test successful login"""
+    try:
+        login_data = {
+            "username": "admin",
+            "password": "admin"
+        }
+        
+        response = requests.post("http://localhost:5002/auth/login", json=login_data, timeout=5)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["username"] == "admin"
+        assert data["role"] == "admin"
+    except requests.exceptions.ConnectionError:
+        pytest.skip("API not running")
 
-if __name__ == "__main__":
-    # Exécution directe pour les tests
-    pytest.main(["-v", __file__])
+def test_login_failure():
+    """Test failed login"""
+    try:
+        login_data = {
+            "username": "nonexistent",
+            "password": "wrongpassword"
+        }
+        
+        response = requests.post("http://localhost:5002/auth/login", json=login_data, timeout=5)
+        assert response.status_code == 401
+    except requests.exceptions.ConnectionError:
+        pytest.skip("API not running")
