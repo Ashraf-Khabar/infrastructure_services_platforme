@@ -2,32 +2,173 @@ pipeline {
     agent any
     
     environment {
-        DOTNET_ROOT = "${WORKSPACE}/dotnet"
-        PATH = "${env.DOTNET_ROOT}:${env.PATH}"
-        DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = "1"
+        DOCKER_COMPOSE_VERSION = "1.29.2"
+        PYTHON_VERSION = "3.9"
     }
     
     stages {
-        stage('Installation .NET') {
+        stage('Vérification de l\'environnement') {
             steps {
                 script {
+                    echo "Vérification des outils nécessaires..."
                     sh '''
-                        # Installer .NET localement
-                        curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-                        chmod +x dotnet-install.sh
-                        ./dotnet-install.sh --channel 8.0 --install-dir ./dotnet
-                        
-                        # Vérifier avec mode invariant
-                        DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 ./dotnet/dotnet --version
+                        echo "Python version:"
+                        python3 --version || true
+                        echo "Docker version:"
+                        docker --version
+                        echo "Docker Compose version:"
+                        docker-compose --version
                     '''
                 }
             }
         }
         
-        stage('Build') {
+        stage('Installation des dépendances Python') {
             steps {
-                sh 'ls -la'
+                script {
+                    echo "Installation des dépendances pour l'API..."
+                    dir('api') {
+                        sh '''
+                            python3 -m pip install --upgrade pip
+                            pip3 install -r requirements.txt
+                        '''
+                    }
+                    
+                    echo "Installation des dépendances pour le client..."
+                    dir('client') {
+                        sh '''
+                            pip3 install -r requirements.txt
+                        '''
+                    }
+                    
+                    echo "Installation des dépendances pour les tests..."
+                    dir('tests') {
+                        sh '''
+                            pip3 install pytest requests
+                        '''
+                    }
+                }
             }
         }
+        
+        stage('Tests unitaires') {
+            steps {
+                script {
+                    echo "Exécution des tests unitaires..."
+                    dir('tests') {
+                        sh '''
+                            python3 -m pytest -v test_api.py
+                        '''
+                    }
+                }
+            }
+            post {
+                always {
+                    junit 'tests/reports/*.xml'
+                }
+            }
+        }
+        
+        stage('Build des images Docker') {
+            steps {
+                script {
+                    echo "Construction des images Docker..."
+                    sh '''
+                        docker-compose build
+                    '''
+                }
+            }
+        }
+        
+        stage('Lancement des conteneurs') {
+            steps {
+                script {
+                    echo "Démarrage des services..."
+                    sh '''
+                        docker-compose up -d
+                    '''
+                    
+                    // Attendre que les services soient opérationnels
+                    sleep 30
+                }
+            }
+        }
+        
+        stage('Tests d\'intégration') {
+            steps {
+                script {
+                    echo "Exécution des tests d'intégration..."
+                    sh '''
+                        # Tester que l'API répond
+                        curl -f http://localhost:5002/ || exit 1
+                        curl -f http://localhost:5002/health || exit 1
+                        
+                        # Tester que le client répond
+                        curl -f http://localhost:8083/login || exit 1
+                        
+                        # Tester l'endpoint des utilisateurs
+                        curl -f http://localhost:5002/users/ || exit 1
+                    '''
+                    
+                    echo "Tests d'intégration réussis !"
+                }
+            }
+        }
+        
+        stage('Tests de sécurité') {
+            steps {
+                script {
+                    echo "Exécution de tests de sécurité basiques..."
+                    sh '''
+                        # Vérifier qu'on ne peut pas accéder aux endpoints sans authentification
+                        if curl -s http://localhost:5002/users/ | grep -q "Not authenticated"; then
+                            echo "Sécurité: Accès non authentifié correctement bloqué"
+                        else
+                            echo "Avertissement: La sécurité d'accès pourrait être améliorée"
+                        fi
+                    '''
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                echo "Nettoyage des conteneurs..."
+                sh '''
+                    docker-compose down --remove-orphans
+                '''
+            }
+            
+            // Archivage des résultats de tests
+            archiveArtifacts artifacts: '**/test-reports/*.xml', allowEmptyArchive: true
+            archiveArtifacts artifacts: '**/logs/*.log', allowEmptyArchive: true
+        }
+        
+        success {
+            echo "Pipeline exécuté avec succès !"
+            slackSend channel: '#jenkins', message: "Build réussi : ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+        }
+        
+        failure {
+            echo "Pipeline a échoué !"
+            slackSend channel: '#jenkins', message: "Build échoué : ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+        }
+        
+        unstable {
+            echo "Pipeline est instable !"
+            slackSend channel: '#jenkins', message: "Build instable : ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+        }
+    }
+    
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        disableConcurrentBuilds()
+    }
+    
+    triggers {
+        pollSCM('H/5 * * * *')
     }
 }
