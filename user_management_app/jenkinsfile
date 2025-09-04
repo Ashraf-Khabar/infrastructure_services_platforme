@@ -6,6 +6,7 @@ pipeline {
     environment {
         VENV_PATH = "${WORKSPACE}/venv"
         APP_DIR = "${WORKSPACE}/user_management_app"
+        API_PID_FILE = "/tmp/api.pid"
     }
 
     stages {
@@ -13,7 +14,7 @@ pipeline {
             steps {
                 sh '''
                     sudo apt update -y
-                    sudo apt install -y python3 python3-pip python3-venv
+                    sudo apt install -y python3 python3-pip python3-venv curl
                     python3 -m venv ${VENV_PATH}
                     ${VENV_PATH}/bin/pip install --upgrade pip
                 '''
@@ -34,7 +35,36 @@ pipeline {
                 }
                 stage('Test Dependencies') {
                     steps {
-                        sh "${VENV_PATH}/bin/pip install -r ${APP_DIR}/tests/requirements.txt"
+                        sh "${VENV_PATH}/bin/pip install pytest requests"
+                    }
+                }
+            }
+        }
+
+        stage('Start API Server') {
+            steps {
+                script {
+                    echo "Starting API server..."
+                    sh """
+                        cd ${APP_DIR}/api
+                        ${VENV_PATH}/bin/python app.py &
+                        echo \$! > ${API_PID_FILE}
+                    """
+                    
+                    // Attendre que l'API soit démarrée
+                    timeout(time: 30, unit: 'SECONDS') {
+                        waitUntil {
+                            try {
+                                sh """
+                                    curl -f http://localhost:5000/health > /dev/null 2>&1
+                                """
+                                echo "API is ready!"
+                                return true
+                            } catch (Exception e) {
+                                sleep(2)
+                                return false
+                            }
+                        }
                     }
                 }
             }
@@ -54,10 +84,26 @@ pipeline {
                     }
                 }
 
-                stage('Conf Tests') {
+                stage('Unit Tests') {
                     steps {
-                        sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/conftest.py -v --tb=short"
+                        sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_unit.py -v --tb=short"
                     }
+                }
+            }
+        }
+
+        stage('Stop API Server') {
+            steps {
+                script {
+                    echo "Stopping API server..."
+                    sh """
+                        if [ -f ${API_PID_FILE} ]; then
+                            kill \$(cat ${API_PID_FILE}) 2>/dev/null || true
+                            rm -f ${API_PID_FILE}
+                        fi
+                        pkill -f "python app.py" 2>/dev/null || true
+                        pkill -f "uvicorn" 2>/dev/null || true
+                    """
                 }
             }
         }
@@ -65,6 +111,12 @@ pipeline {
 
     post {
         always {
+            sh """
+                # Nettoyage assuré
+                pkill -f "python app.py" 2>/dev/null || true
+                pkill -f "uvicorn" 2>/dev/null || true
+                rm -f ${API_PID_FILE} 2>/dev/null || true
+            """
             cleanWs()
         }
     }
