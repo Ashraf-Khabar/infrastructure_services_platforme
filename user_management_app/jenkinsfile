@@ -29,7 +29,7 @@ pipeline {
                         sh '''
                             echo "=== Installing core dependencies ==="
                             ${VENV_PATH}/bin/pip install "sqlalchemy>=2.0.24" "fastapi==0.104.1" "uvicorn==0.24.0"
-                            echo "✅ Core dependencies installed"
+                            echo " Core dependencies installed"
                         '''
                     }
                 }
@@ -39,7 +39,7 @@ pipeline {
                         sh '''
                             echo "=== Installing web dependencies ==="
                             ${VENV_PATH}/bin/pip install "starlette==0.27.0" "httpx==0.24.1" "flask==2.3.3" "requests==2.31.0"
-                            echo "✅ Web dependencies installed"
+                            echo " Web dependencies installed"
                         '''
                     }
                 }
@@ -49,7 +49,7 @@ pipeline {
                         sh '''
                             echo "=== Installing database & test dependencies ==="
                             ${VENV_PATH}/bin/pip install "psycopg2-binary>=2.9.6" "pytest==7.4.3"
-                            echo "✅ Database & test dependencies installed"
+                            echo " Database & test dependencies installed"
                         '''
                     }
                 }
@@ -74,29 +74,29 @@ pipeline {
 try:
     from sqlalchemy import create_engine, Column, Integer, String
     from sqlalchemy.orm import sessionmaker
-    print('✅ SQLAlchemy imports successful')
+    print(' SQLAlchemy imports successful')
 except Exception as e:
-    print(f'❌ SQLAlchemy import failed: {e}')
+    print(f' SQLAlchemy import failed: {e}')
 
 try:
     from fastapi import FastAPI
-    print('✅ FastAPI import successful')
+    print(' FastAPI import successful')
 except Exception as e:
-    print(f'❌ FastAPI import failed: {e}')
+    print(f' FastAPI import failed: {e}')
 
 try:
     import flask
-    print('✅ Flask import successful')
+    print(' Flask import successful')
 except Exception as e:
-    print(f'❌ Flask import failed: {e}')
+    print(f' Flask import failed: {e}')
 
 try:
     import pytest
-    print('✅ Pytest import successful')
+    print(' Pytest import successful')
 except Exception as e:
-    print(f'❌ Pytest import failed: {e}')
+    print(f' Pytest import failed: {e}')
 
-print('✅ All basic imports completed')
+print(' All basic imports completed')
                     "
                 '''
             }
@@ -135,13 +135,13 @@ def test_basic_functionality():
     result = health_check()
     assert result == {"status": "healthy"}
     
-    print("✅ Basic API functionality test passed!")
+    print(" Basic API functionality test passed!")
 
 if __name__ == "__main__":
     test_basic_functionality()
-    print("✅ All API tests passed!")
+    print(" All API tests passed!")
 EOF
-                            echo "✅ API test file created"
+                            echo " API test file created"
                         '''
                     }
                 }
@@ -205,16 +205,16 @@ def test_model_operations():
         deleted = session.query(User).filter_by(username="testuser").first()
         assert deleted is None
         
-        print("✅ All model operations test passed!")
+        print(" All model operations test passed!")
         
     finally:
         session.close()
 
 if __name__ == "__main__":
     test_model_operations()
-    print("✅ All model tests passed!")
+    print(" All model tests passed!")
 EOF
-                            echo "✅ Model test file created"
+                            echo " Model test file created"
                         '''
                     }
                 }
@@ -267,19 +267,19 @@ def test_with_requests():
         assert response.status_code == 200
         assert response.json() == {"status": "healthy"}
         
-        print("✅ FastAPI test with requests passed!")
+        print(" FastAPI test with requests passed!")
         
     except Exception as e:
-        print(f"❌ FastAPI test failed: {e}")
+        print(f"FastAPI test failed: {e}")
         raise
     finally:
         pass
 
 if __name__ == "__main__":
     test_with_requests()
-    print("✅ Alternative FastAPI test passed!")
+    print(" Alternative FastAPI test passed!")
 EOF
-                            echo "✅ Alternative test file created"
+                            echo " Alternative test file created"
                         '''
                     }
                 }
@@ -294,7 +294,7 @@ EOF
                             echo "=== Running API tests ==="
                             cd user_management_app/tests
                             ${VENV_PATH}/bin/python working_test_api.py
-                            echo "✅ API tests completed"
+                            echo " API tests completed"
                         '''
                     }
                 }
@@ -305,7 +305,7 @@ EOF
                             echo "=== Running Model tests ==="
                             cd user_management_app/tests
                             ${VENV_PATH}/bin/python working_test_models.py
-                            echo "✅ Model tests completed"
+                            echo " Model tests completed"
                         '''
                     }
                 }
@@ -364,7 +364,7 @@ session.commit()
 updated = session.query(Product).filter_by(name='Laptop').first()
 assert updated.price == 1200
 
-print('✅ SQLAlchemy CRUD operations test passed')
+print(' SQLAlchemy CRUD operations test passed')
                             "
                         '''
                     }
@@ -400,7 +400,7 @@ item = Item(name='Phone', price=500.0)
 result = create_item(item)
 assert result == {'name': 'Phone', 'price': 500.0}
 
-print('✅ FastAPI features test passed')
+print(' FastAPI features test passed')
                             "
                         '''
                     }
@@ -429,7 +429,7 @@ with app.test_client() as client:
     assert response.status_code == 200
     assert response.get_json() == {'name': 'Tablet', 'price': 300.0}
 
-print('✅ Flask features test passed')
+print(' Flask features test passed')
                             "
                         '''
                     }
@@ -456,10 +456,10 @@ print('✅ Flask features test passed')
             '''
         }
         success {
-            echo '✅ Build process completed successfully!'
+            echo ' Build process completed successfully!'
         }
         failure {
-            echo '❌ Build process encountered issues!'
+            echo ' Build process encountered issues!'
         }
     }
 }
