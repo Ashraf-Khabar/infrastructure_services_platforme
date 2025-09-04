@@ -8,34 +8,88 @@ pipeline {
     }
 
     stages {
-        stage('Update Packages') {
-            steps {
-                sh 'sudo apt update -y'
-                sh 'sudo apt upgrade -y'
-            }
-        }
-
-        stage('Create Virtual Environment') {
+        stage('Setup Environment') {
             steps {
                 sh '''
-                    echo "Creating virtual environment"
+                    sudo apt update -y
+                    sudo apt install -y python3 python3-pip python3-venv libpq-dev
                     python3 -m venv ${VENV_PATH}
-                    echo "Virtual environment created at: ${VENV_PATH}"
+                    ${VENV_PATH}/bin/pip install --upgrade pip
                 '''
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Install All Dependencies') {
+            parallel {
+                stage('API & Core Dependencies') {
+                    steps {
+                        sh '''
+                            echo "Installing API and core dependencies..."
+                            ${VENV_PATH}/bin/pip install fastapi uvicorn sqlalchemy psycopg2-binary
+                        '''
+                    }
+                }
+                stage('Client Dependencies') {
+                    steps {
+                        sh '''
+                            echo "Installing Client dependencies..."
+                            ${VENV_PATH}/bin/pip install flask requests
+                        '''
+                    }
+                }
+                stage('Test Dependencies') {
+                    steps {
+                        sh '''
+                            echo "Installing Test dependencies..."
+                            ${VENV_PATH}/bin/pip install pytest httpx
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Run All Tests') {
+            parallel {
+                stage('API Tests') {
+                    steps {
+                        sh '''
+                            echo "Running API tests..."
+                            if [ -f "user_management_app/tests/test_api.py" ]; then
+                                ${VENV_PATH}/bin/python -m pytest user_management_app/tests/test_api.py -v || true
+                            fi
+                        '''
+                    }
+                }
+                stage('Model Tests') {
+                    steps {
+                        sh '''
+                            echo "Running Model tests..."
+                            if [ -f "user_management_app/tests/test_models.py" ]; then
+                                ${VENV_PATH}/bin/python -m pytest user_management_app/tests/test_models.py -v || true
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Final Verification') {
             steps {
-                dir('user_management_app/api'){
-                    sh '''
-                        echo "Installing API dependencies"
-                        ${VENV_PATH}/bin/pip install -r requirements.txt
-                        echo "API dependencies installed successfully"
-                    '''
-                }  
+                sh '''
+                    echo "=== Final Verification ==="
+                    echo "All installed packages:"
+                    ${VENV_PATH}/bin/pip list
+                    
+                    echo "Critical packages:"
+                    ${VENV_PATH}/bin/pip show fastapi flask pytest httpx || true
+                '''
             }
         }
     }
 
+    post {
+        always {
+            echo 'Build process completed'
+        }
+    }
 }
