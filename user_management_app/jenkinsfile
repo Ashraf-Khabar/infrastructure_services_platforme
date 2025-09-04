@@ -2,6 +2,11 @@ pipeline {
     agent {
         label 'python_slave_agent'
     }
+
+    environment {
+        VENV_PATH = "${WORKSPACE}/venv"
+    }
+
     stages {
         stage('Update Packages') {
             steps {
@@ -10,11 +15,24 @@ pipeline {
             }
         }
 
+        stage('Create Virtual Environment') {
+            steps {
+                sh '''
+                    echo "Creating virtual environment"
+                    python3 -m venv ${VENV_PATH}
+                    echo "Virtual environment created at: ${VENV_PATH}"
+                '''
+            }
+        }
+
         stage('Install Dependencies') {
             steps {
                 dir('user_management_app/api'){
-                    sh 'ls -li'
-                    sh 'pip3 install -r requirements.txt'
+                    sh '''
+                        echo "Installing API dependencies"
+                        ${VENV_PATH}/bin/pip install -r requirements.txt
+                        echo "API dependencies installed successfully"
+                    '''
                 }  
             }
         }
