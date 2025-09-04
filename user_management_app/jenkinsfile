@@ -1,14 +1,16 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'python:3.9-slim'
+            reuseNode true
+        }
+    }
     
     stages {
-        stage('Install Python') {
+        stage('Check Python') {
             steps {
                 sh '''
-                    apt update
-                    apt install -y python3
                     python3 --version
-                    apt install -y python3-pip
                     pip3 --version
                 '''
             }
