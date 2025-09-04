@@ -14,8 +14,8 @@ pipeline {
                     
                     sh '''
                         # Mise à jour des paquets et installation de Python 3
-                        sudo apt-get update
-                        sudo apt-get install -y python3 python3-venv python3-pip
+                        apt-get update
+                        apt-get install -y python3 python3-venv python3-pip
                         
                         # Vérification de l'installation
                         python3 --version
@@ -42,7 +42,7 @@ pipeline {
             steps {
                 sh '''
                     # Installation des dépendances système pour PostgreSQL
-                    sudo apt-get install -y libpq-dev gcc
+                    apt-get install -y libpq-dev gcc
                 '''
             }
         }
@@ -182,17 +182,17 @@ pipeline {
         }
         
         success {
-            echo '✅ Pipeline exécuté avec succès!'
+            echo 'Pipeline exécuté avec succès!'
             // slackSend color: 'good', message: "Build ${env.JOB_NAME} #${env.BUILD_NUMBER} réussi"
         }
         
         failure {
-            echo '❌ Pipeline a échoué!'
+            echo 'Pipeline a échoué!'
             // slackSend color: 'danger', message: "Build ${env.JOB_NAME} #${env.BUILD_NUMBER} échoué"
         }
         
         unstable {
-            echo '⚠️ Pipeline instable!'
+            echo 'Pipeline instable!'
             // slackSend color: 'warning', message: "Build ${env.JOB_NAME} #${env.BUILD_NUMBER} instable"
         }
     }
