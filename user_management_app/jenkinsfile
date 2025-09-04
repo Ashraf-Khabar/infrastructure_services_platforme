@@ -1,13 +1,12 @@
 pipeline {
-    agent any
+    agent {
+        label 'dotnet_slave_agent'
+    }
     stages {
-        stage('Build') {
+        stage('Update Packages') {
             steps {
-                // Au lieu de sudo apt update
-                sh 'apt update'
-                
-                // Ou utiliser le chemin complet avec permissions
-                sh '/usr/bin/apt update'
+                sh 'sudo apt update -y'
+                sh 'sudo apt upgrade -y'
             }
         }
     }
