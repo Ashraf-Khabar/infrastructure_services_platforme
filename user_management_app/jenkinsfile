@@ -2,28 +2,70 @@ pipeline {
     agent any
     
     stages {
-        stage('Vérifier Python existant') {
+        stage('Installation de Python 3.9') {
             steps {
-                sh '''
-                    echo "Vérification de Python installé..."
-                    echo "Python 3 version:"
-                    python3 --version || echo "Python3 non trouvé"
+                script {
+                    echo "🐍 Installation de Python 3.9 depuis les sources..."
                     
-                    echo "Python disponible:"
-                    which python3 || which python || echo "Aucun Python trouvé"
-                    
-                    echo "Pip disponible:"
-                    python3 -m pip --version || echo "Pip non trouvé"
-                '''
+                    sh '''
+                        # Étape 1: Vérifier si Python est déjà installé
+                        if command -v python3.9 >/dev/null 2>&1; then
+                            echo "✅ Python 3.9 est déjà installé"
+                            python3.9 --version
+                            exit 0
+                        fi
+                        
+                        # Étape 2: Créer un répertoire d'installation
+                        PYTHON_DIR="$HOME/python-3.9"
+                        mkdir -p $PYTHON_DIR
+                        cd $PYTHON_DIR
+                        
+                        # Étape 3: Télécharger Python 3.9
+                        echo "📦 Téléchargement de Python 3.9..."
+                        wget https://www.python.org/ftp/python/3.9.18/Python-3.9.18.tgz
+                        
+                        # Étape 4: Extraire
+                        tar -xzf Python-3.9.18.tgz
+                        cd Python-3.9.18
+                        
+                        # Étape 5: Configurer pour installation locale
+                        echo "⚙️ Configuration de l'installation..."
+                        ./configure --prefix=$PYTHON_DIR --enable-optimizations
+                        
+                        # Étape 6: Compiler (cela peut prendre du temps)
+                        echo "🔨 Compilation en cours..."
+                        make -j $(nproc)
+                        
+                        # Étape 7: Installer localement
+                        echo "📦 Installation..."
+                        make install
+                        
+                        # Étape 8: Ajouter au PATH
+                        export PATH="$PYTHON_DIR/bin:$PATH"
+                        echo 'export PATH="$HOME/python-3.9/bin:$PATH"' >> ~/.bashrc
+                        echo 'export PATH="$HOME/python-3.9/bin:$PATH"' >> ~/.profile
+                        
+                        # Étape 9: Vérification
+                        echo "✅ Vérification..."
+                        $PYTHON_DIR/bin/python3.9 --version
+                        
+                        echo "🎉 Python 3.9 installé avec succès dans: $PYTHON_DIR"
+                    '''
+                }
             }
         }
         
-        stage('Utiliser Python existant') {
+        stage('Configuration du PATH') {
             steps {
-                script {
-                    echo "Utilisation de Python déjà installé"
-                    echo "Le pipeline utilisera le Python disponible sur l'agent"
-                }
+                sh '''
+                    # Configurer le PATH pour cette session
+                    export PATH="$HOME/python-3.9/bin:$PATH"
+                    
+                    echo "=== VÉRIFICATION ==="
+                    echo "Python: $(python3.9 --version)"
+                    echo "Pip: $(python3.9 -m pip --version)"
+                    echo "Emplacement: $(which python3.9)"
+                '''
             }
         }
     }
