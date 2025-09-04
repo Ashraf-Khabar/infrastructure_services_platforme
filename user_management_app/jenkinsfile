@@ -7,7 +7,6 @@ pipeline {
                 script {
                     echo "Analyse de l'environnement Jenkins..."
                     
-                    // Vérifier ce qui est disponible
                     sh '''
                         echo "=== ENVIRONNEMENT DISPONIBLE ==="
                         echo "User: $(whoami)"
@@ -17,17 +16,47 @@ pipeline {
                         echo ""
                         
                         echo "=== COMMANDES DISPONIBLES ==="
-                        for cmd in python python3 pip pip3 docker docker-compose apt-get yum apk; do
-                            if command -v $cmd >/dev/null 2>&1; then
-                                echo "✓ $cmd: $(which $cmd)"
-                            else
-                                echo "✗ $cmd: non disponible"
-                            fi
-                        done
+                        # Vérifier les commandes une par une
+                        if command -v python >/dev/null 2>&1; then
+                            echo "✓ python: $(which python)"
+                        else
+                            echo "✗ python: non disponible"
+                        fi
+                        
+                        if command -v python3 >/dev/null 2>&1; then
+                            echo "✓ python3: $(which python3)"
+                        else
+                            echo "✗ python3: non disponible"
+                        fi
+                        
+                        if command -v pip >/dev/null 2>&1; then
+                            echo "✓ pip: $(which pip)"
+                        else
+                            echo "✗ pip: non disponible"
+                        fi
+                        
+                        if command -v pip3 >/dev/null 2>&1; then
+                            echo "✓ pip3: $(which pip3)"
+                        else
+                            echo "✗ pip3: non disponible"
+                        fi
+                        
+                        if command -v docker >/dev/null 2>&1; then
+                            echo "✓ docker: $(which docker)"
+                        else
+                            echo "✗ docker: non disponible"
+                        fi
+                        
+                        if command -v docker-compose >/dev/null 2>&1; then
+                            echo "✓ docker-compose: $(which docker-compose)"
+                        else
+                            echo "✗ docker-compose: non disponible"
+                        fi
                         
                         echo ""
                         echo "=== PERMISSIONS ==="
-                        echo "Écriture dans $(pwd): $(touch test_write.txt 2>/dev/null && echo '✓' || echo '✗')"
+                        # Test d'écriture simple
+                        touch test_write.txt 2>/dev/null && echo "✓ Écriture possible" || echo "✗ Écriture impossible"
                         rm -f test_write.txt 2>/dev/null || true
                         
                         echo ""
@@ -43,41 +72,73 @@ pipeline {
                 sh '''
                     echo "=== VÉRIFICATION DES FICHIERS REQUIS ==="
                     
-                    # Fichiers obligatoires
-                    REQUIRED_FILES=(
-                        "api/requirements.txt"
-                        "client/requirements.txt"
-                        "api/app.py"
-                        "client/app.py"
-                        "docker-compose.yml"
-                    )
+                    # Vérifier chaque fichier individuellement
+                    error_count=0
                     
-                    ALL_FILES_EXIST=true
-                    for file in "${REQUIRED_FILES[@]}"; do
-                        if [ -f "$file" ]; then
-                            echo "✓ $file"
-                        else
-                            echo "✗ $file - MANQUANT"
-                            ALL_FILES_EXIST=false
-                        fi
-                    done
+                    # Fichiers obligatoires
+                    if [ -f "api/requirements.txt" ]; then
+                        echo "✓ api/requirements.txt"
+                    else
+                        echo "✗ api/requirements.txt - MANQUANT"
+                        error_count=$((error_count + 1))
+                    fi
+                    
+                    if [ -f "client/requirements.txt" ]; then
+                        echo "✓ client/requirements.txt"
+                    else
+                        echo "✗ client/requirements.txt - MANQUANT"
+                        error_count=$((error_count + 1))
+                    fi
+                    
+                    if [ -f "api/app.py" ]; then
+                        echo "✓ api/app.py"
+                    else
+                        echo "✗ api/app.py - MANQUANT"
+                        error_count=$((error_count + 1))
+                    fi
+                    
+                    if [ -f "client/app.py" ]; then
+                        echo "✓ client/app.py"
+                    else
+                        echo "✗ client/app.py - MANQUANT"
+                        error_count=$((error_count + 1))
+                    fi
+                    
+                    if [ -f "docker-compose.yml" ]; then
+                        echo "✓ docker-compose.yml"
+                    else
+                        echo "✗ docker-compose.yml - MANQUANT"
+                        error_count=$((error_count + 1))
+                    fi
                     
                     # Dossiers obligatoires
-                    REQUIRED_DIRS=("api" "client" "tests")
-                    for dir in "${REQUIRED_DIRS[@]}"; do
-                        if [ -d "$dir" ]; then
-                            echo "✓ $dir/"
-                        else
-                            echo "✗ $dir/ - MANQUANT"
-                            ALL_FILES_EXIST=false
-                        fi
-                    done
-                    
-                    if [ "$ALL_FILES_EXIST" = false ]; then
-                        echo "❌ Des fichiers/dossiers requis manquent"
-                        exit 1
+                    if [ -d "api" ]; then
+                        echo "✓ api/"
                     else
+                        echo "✗ api/ - MANQUANT"
+                        error_count=$((error_count + 1))
+                    fi
+                    
+                    if [ -d "client" ]; then
+                        echo "✓ client/"
+                    else
+                        echo "✗ client/ - MANQUANT"
+                        error_count=$((error_count + 1))
+                    fi
+                    
+                    if [ -d "tests" ]; then
+                        echo "✓ tests/"
+                    else
+                        echo "✗ tests/ - MANQUANT"
+                        error_count=$((error_count + 1))
+                    fi
+                    
+                    echo ""
+                    if [ $error_count -eq 0 ]; then
                         echo "✅ Tous les fichiers/dossiers requis sont présents"
+                    else
+                        echo "❌ $error_count fichiers/dossiers manquants"
+                        exit 1
                     fi
                 '''
             }
@@ -90,22 +151,51 @@ pipeline {
                     
                     # Afficher les premières lignes des fichiers importants
                     echo "--- api/requirements.txt ---"
-                    head -10 api/requirements.txt || echo "Impossible de lire le fichier"
+                    if [ -f "api/requirements.txt" ]; then
+                        head -10 api/requirements.txt
+                    else
+                        echo "Fichier non trouvé"
+                    fi
                     echo ""
                     
                     echo "--- client/requirements.txt ---"
-                    head -10 client/requirements.txt || echo "Impossible de lire le fichier"
+                    if [ -f "client/requirements.txt" ]; then
+                        head -10 client/requirements.txt
+                    else
+                        echo "Fichier non trouvé"
+                    fi
                     echo ""
                     
                     echo "--- docker-compose.yml (extrait) ---"
-                    head -20 docker-compose.yml || echo "Impossible de lire le fichier"
+                    if [ -f "docker-compose.yml" ]; then
+                        head -20 docker-compose.yml
+                    else
+                        echo "Fichier non trouvé"
+                    fi
                     echo ""
                     
-                    # Compter les lignes de code
+                    # Compter les lignes de code (simplifié)
                     echo "--- STATISTIQUES DE CODE ---"
-                    echo "API: $(find api -name "*.py" -exec cat {} \\; | wc -l) lignes Python"
-                    echo "Client: $(find client -name "*.py" -exec cat {} \\; | wc -l) lignes Python"
-                    echo "Tests: $(find tests -name "*.py" -exec cat {} \\; | wc -l) lignes Python"
+                    if [ -d "api" ]; then
+                        api_lines=$(find api -name "*.py" -exec cat {} \\; 2>/dev/null | wc -l || echo "0")
+                        echo "API: $api_lines lignes Python"
+                    else
+                        echo "API: dossier manquant"
+                    fi
+                    
+                    if [ -d "client" ]; then
+                        client_lines=$(find client -name "*.py" -exec cat {} \\; 2>/dev/null | wc -l || echo "0")
+                        echo "Client: $client_lines lignes Python"
+                    else
+                        echo "Client: dossier manquant"
+                    fi
+                    
+                    if [ -d "tests" ]; then
+                        tests_lines=$(find tests -name "*.py" -exec cat {} \\; 2>/dev/null | wc -l || echo "0")
+                        echo "Tests: $tests_lines lignes Python"
+                    else
+                        echo "Tests: dossier manquant"
+                    fi
                 '''
             }
         }
@@ -115,11 +205,14 @@ pipeline {
                 script {
                     echo "Validation de la syntaxe Docker..."
                     
-                    // Essayer de valider docker-compose si disponible
                     sh '''
                         if command -v docker-compose >/dev/null 2>&1; then
                             echo "Validation de docker-compose.yml..."
-                            docker-compose config -q && echo "✓ docker-compose.yml valide" || echo "✗ docker-compose.yml invalide"
+                            if docker-compose config -q; then
+                                echo "✓ docker-compose.yml valide"
+                            else
+                                echo "✗ docker-compose.yml invalide"
+                            fi
                         else
                             echo "docker-compose non disponible, skip de la validation"
                         fi
@@ -142,17 +235,25 @@ pipeline {
                     
                     echo "FICHIERS PYTHON:" >> validation_report.txt
                     echo "================" >> validation_report.txt
-                    find . -name "*.py" | head -10 >> validation_report.txt
+                    find . -name "*.py" | head -10 >> validation_report.txt 2>/dev/null || echo "Aucun fichier Python trouvé" >> validation_report.txt
                     echo "" >> validation_report.txt
                     
                     echo "DEPENDANCES API:" >> validation_report.txt
                     echo "================" >> validation_report.txt
-                    cat api/requirements.txt >> validation_report.txt 2>/dev/null || echo "Non lisible" >> validation_report.txt
+                    if [ -f "api/requirements.txt" ]; then
+                        cat api/requirements.txt >> validation_report.txt
+                    else
+                        echo "Fichier non trouvé" >> validation_report.txt
+                    fi
                     echo "" >> validation_report.txt
                     
                     echo "DEPENDANCES CLIENT:" >> validation_report.txt
                     echo "===================" >> validation_report.txt
-                    cat client/requirements.txt >> validation_report.txt 2>/dev/null || echo "Non lisible" >> validation_report.txt
+                    if [ -f "client/requirements.txt" ]; then
+                        cat client/requirements.txt >> validation_report.txt
+                    else
+                        echo "Fichier non trouvé" >> validation_report.txt
+                    fi
                     echo "" >> validation_report.txt
                     
                     echo "VALIDATION TERMINEE: $(date)" >> validation_report.txt
@@ -165,18 +266,17 @@ pipeline {
         always {
             script {
                 // Archivage du rapport
-                archiveArtifacts artifacts: 'validation_report.txt', allowEmptyArchive: false
+                archiveArtifacts artifacts: 'validation_report.txt', allowEmptyArchive: true
                 
                 // Affichage du résumé
                 sh '''
                     echo "=== RÉSUMÉ DU PIPELINE ==="
                     echo "Rapport généré: validation_report.txt"
-                    echo "Fichiers archivés: voir l'artefact Jenkins"
                     echo ""
                     echo "Prochaines étapes recommandées:"
                     echo "1. Configurer un agent Jenkins avec Python et Docker"
-                    echo "2. Ou utiliser un environnement cloud avec les outils requis"
-                    echo "3. Ou contacter l'administrateur Jenkins pour installer Python"
+                    echo "2. Utiliser un environnement cloud avec les outils requis"
+                    echo "3. Contacter l'administrateur Jenkins pour installer Python"
                 '''
             }
         }
