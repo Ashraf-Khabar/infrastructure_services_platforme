@@ -1,47 +1,56 @@
+version: '3.8'
+
 services:
   user-management-api:
     build:
-      context: .
-      dockerfile: UserManagement.API/Dockerfile
+      context: ./api
+      dockerfile: Dockerfile
     ports:
-      - "5002:8080"
+      - "5000:5000"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__DefaultConnection=Host=app-db;Port=5432;Database=user_management;Username=appuser;Password=apppassword
+      - PYTHONUNBUFFERED=1
+      - FLASK_ENV=development
     depends_on:
       app-db:
-        condition: service_healthy  # ✅ Attend que la DB soit healthy
+        condition: service_healthy
     networks:
       - app-network
+    volumes:
+      - ./api:/app
 
   user-management-client:
     build:
-      context: .
-      dockerfile: UserManagement.Client/Dockerfile
+      context: ./client
+      dockerfile: Dockerfile
     ports:
       - "8083:8083"
+    environment:
+      - DOCKER=true
     depends_on:
       - user-management-api
     networks:
       - app-network
+    volumes:
+      - ./client:/app
 
   app-db:
-      image: postgres:13
-      environment:
-        - POSTGRES_DB=user_management
-        - POSTGRES_USER=appuser
-        - POSTGRES_PASSWORD=apppassword
-      ports:
-        - "5432:5432"
-      volumes:
-        - postgres_data:/var/lib/postgresql/data
-      healthcheck:  # ✅ Ajoutez un healthcheck
-        test: ["CMD-SHELL", "pg_isready -U appuser -d user_management"]
-        interval: 5s
-        timeout: 5s
-        retries: 10
-      networks:
-        - app-network
+    image: postgres:13
+    environment:
+      - POSTGRES_DB=user_management
+      - POSTGRES_USER=appuser
+      - POSTGRES_PASSWORD=apppassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d user_management"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-network
 
 networks:
   app-network:

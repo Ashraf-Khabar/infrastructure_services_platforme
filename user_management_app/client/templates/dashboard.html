@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - User Management{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Dashboard</h1>
+    <span class="badge bg-{{ 'danger' if user.role == 'admin' else 'primary' }}">
+        {{ user.role|capitalize }} User
+    </span>
+</div>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    Logged in as <strong>{{ user.username }}</strong> ({{ user.role }})
+</div>
+
+<div class="row">
+    <div class="col-md-4">
+        <div class="card text-white bg-primary mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5 class="card-title">Total Users</h5>
+                        <h2 class="card-text">{{ stats.total_users if stats else 0 }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-people-fill display-6"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-white bg-success mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5 class="card-title">Active Users</h5>
+                        <h2 class="card-text">{{ stats.active_users if stats else 0 }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-check-circle-fill display-6"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-white bg-info mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5 class="card-title">Admin Users</h5>
+                        <h2 class="card-text">{{ stats.admin_users if stats else 0 }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-shield-fill display-6"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title">Recent Users</h5>
+            </div>
+            <div class="card-body">
+                {% if error %}
+                    <div class="alert alert-warning">{{ error }}</div>
+                {% elif users %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Username</th>
+                                    <th>Email</th>
+                                    <th>Name</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for user_item in users %}
+                                <tr>
+                                    <td>{{ user_item.id }}</td>
+                                    <td>{{ user_item.username }}</td>
+                                    <td>{{ user_item.email }}</td>
+                                    <td>{{ user_item.first_name }} {{ user_item.last_name }}</td>
+                                    <td>
+                                        <span class="badge bg-{{ 'danger' if user_item.role == 'admin' else 'primary' }}">
+                                            {{ user_item.role }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-{{ 'success' if user_item.is_active else 'secondary' }}">
+                                            {{ 'Active' if user_item.is_active else 'Inactive' }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted">No users found.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
