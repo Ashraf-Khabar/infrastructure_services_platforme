@@ -119,6 +119,8 @@ pipeline {
             steps {
                 script {
                     echo "Building Python package..."
+
+                    sh '${VENV_PATH}/bin/pip install setuptools wheel'
                     sh """
                         cd ${APP_DIR}
                         ${VENV_PATH}/bin/python setup.py sdist bdist_wheel
