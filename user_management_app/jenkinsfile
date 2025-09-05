@@ -15,7 +15,6 @@ pipeline {
         NEXUS_CREDENTIALS_ID = 'JENKINS_TOKEN'
         PYTHON_PACKAGE_VERSION = '1.0.0'
         
-        // Chemin vers le template HTML
         EMAIL_TEMPLATE_PATH = "${WORKSPACE}/internal_apps_monitoring/mail/email-template.html"
     }
 
@@ -163,7 +162,6 @@ pipeline {
             script {
                 BUILD_STATUS = currentBuild.currentResult
                 
-                // Nettoyage plus ciblé
                 sh """
                     if [ -f ${API_PID_FILE} ]; then
                         PID=\$(cat ${API_PID_FILE})
@@ -173,21 +171,18 @@ pipeline {
                     # Nettoyage des processus Python de l'application seulement
                     pkill -f "python.*app\\.py" 2>/dev/null || true
                 """
-                
-                // Déterminer la couleur selon le statut
+
                 def statusColor
                 if (BUILD_STATUS == 'SUCCESS') {
-                    statusColor = '#28a745' // Vert
+                    statusColor = '#28a745' 
                 } else if (BUILD_STATUS == 'UNSTABLE') {
-                    statusColor = '#ffc107' // Jaune
+                    statusColor = '#ffc107' 
                 } else {
-                    statusColor = '#dc3545' // Rouge
+                    statusColor = '#dc3545' 
                 }
                 
-                // Charger le template HTML
                 def emailTemplate = readFile(file: env.EMAIL_TEMPLATE_PATH)
                 
-                // Remplacer les variables dans le template
                 def emailBody = emailTemplate
                     .replace('${STATUS_COLOR}', statusColor)
                     .replace('${BUILD_STATUS}', BUILD_STATUS)
