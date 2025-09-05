@@ -7,9 +7,13 @@ pipeline {
         VENV_PATH = "${WORKSPACE}/venv"
         APP_DIR = "${WORKSPACE}/user_management_app"
         API_PID_FILE = "/tmp/api.pid"
-        // Configuration email
-        EMAIL_RECIPIENTS = 'test@example.com' // Modifier avec l'email de test
+        EMAIL_RECIPIENTS = 'khabarachraf@gmail.com'
         BUILD_STATUS = "UNKNOWN"
+        
+        NEXUS_URL = 'http://nexus.host.internal'
+        NEXUS_REPOSITORY = 'user_management_app'  // Corrigé le nom
+        NEXUS_CREDENTIALS_ID = 'JENKINS_TOKEN'  // ✅ Juste l'ID maintenant
+        PYTHON_PACKAGE_VERSION = '1.0.0'
     }
 
     stages {
@@ -50,11 +54,10 @@ pipeline {
                     echo "Starting API server..."
                     sh """
                         cd ${APP_DIR}/api
-                        ${VENV_PATH}/bin/python app.py &
+                        nohup ${VENV_PATH}/bin/python app.py > api.log 2>&1 &
                         echo \$! > ${API_PID_FILE}
                     """
                     
-                    // Attendre que l'API soit démarrée
                     timeout(time: 30, unit: 'SECONDS') {
                         waitUntil {
                             try {
@@ -101,12 +104,51 @@ pipeline {
                     echo "Stopping API server..."
                     sh """
                         if [ -f ${API_PID_FILE} ]; then
-                            kill \$(cat ${API_PID_FILE}) 2>/dev/null || true
+                            PID=\$(cat ${API_PID_FILE})
+                            kill \$PID 2>/dev/null || true
+                            sleep 2
+                            kill -9 \$PID 2>/dev/null || true
                             rm -f ${API_PID_FILE}
                         fi
-                        pkill -f "python app.py" 2>/dev/null || true
-                        pkill -f "uvicorn" 2>/dev/null || true
                     """
+                }
+            }
+        }
+
+        stage('Build Python Package') {
+            steps {
+                script {
+                    echo "Building Python package..."
+                    sh """
+                        cd ${APP_DIR}
+                        ${VENV_PATH}/bin/python setup.py sdist bdist_wheel
+                    """
+                    sh "ls -la ${APP_DIR}/dist/"
+                }
+            }
+        }
+
+        stage('Deploy to Nexus') {
+            steps {
+                script {
+                    echo "Deploying to Nexus Sonatype..."
+                    
+                    withCredentials([usernamePassword(
+                        credentialsId: env.NEXUS_CREDENTIALS_ID,
+                        usernameVariable: 'NEXUS_USER',
+                        passwordVariable: 'NEXUS_PASSWORD'
+                    )]) {
+                        sh """
+                            cd ${APP_DIR}
+                            ${VENV_PATH}/bin/pip install twine
+                            
+                            # URL complète pour twine
+                            ${VENV_PATH}/bin/twine upload \
+                                --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
+                                -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
+                                dist/*
+                        """
+                    }
                 }
             }
         }
@@ -115,17 +157,19 @@ pipeline {
     post {
         always {
             script {
-                // Déterminer le statut du build
                 BUILD_STATUS = currentBuild.currentResult
                 
-                // Nettoyage
+                // Nettoyage plus ciblé
                 sh """
-                    pkill -f "python app.py" 2>/dev/null || true
-                    pkill -f "uvicorn" 2>/dev/null || true
-                    rm -f ${API_PID_FILE} 2>/dev/null || true
+                    if [ -f ${API_PID_FILE} ]; then
+                        PID=\$(cat ${API_PID_FILE})
+                        kill \$PID 2>/dev/null || true
+                        rm -f ${API_PID_FILE}
+                    fi
+                    # Nettoyage des processus Python de l'application seulement
+                    pkill -f "python.*app\\.py" 2>/dev/null || true
                 """
                 
-                // Envoyer l'email de notification (version simplifiée)
                 emailext (
                     subject: "Build ${BUILD_STATUS}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
                     body: """
@@ -136,8 +180,8 @@ pipeline {
                         <p><strong>Durée:</strong> ${currentBuild.durationString}</p>
                         <p><strong>URL du build:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
                         
-                        <h3>Résumé des tests:</h3>
-                        <p>Consultez les logs détaillés dans Jenkins pour plus d'informations.</p>
+                        <h3>Artefacts déployés:</h3>
+                        <p>Package Python déployé sur Nexus: ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/</p>
                         
                         <p>Consultez MailHog pour voir cet email: http://mail.host.internal:8025</p>
                     """,
@@ -146,18 +190,6 @@ pipeline {
                 )
             }
             cleanWs()
-        }
-        
-        success {
-            echo "Build réussi - Email de notification envoyé"
-        }
-        
-        failure {
-            echo "Build échoué - Email de notification envoyé"
-        }
-        
-        unstable {
-            echo "Build instable - Email de notification envoyé"
         }
     }
 }
