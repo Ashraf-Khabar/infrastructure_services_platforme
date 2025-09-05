@@ -1,24 +1,25 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="user-management-app",
-    version="1.0.3",
+    name="user_management_app",
+    version="2.0.0",
     packages=find_packages(),
     install_requires=[
-        "Flask>=1.1.2",
-        "SQLAlchemy>=1.3.23",
-        "requests>=2.25.1",
-        "pytest>=6.2.2",
-        "gunicorn>=20.0.4",
-        "flask_sqlalchemy>=2.4.4"
+        "fastapi>=0.104.1",
+        "uvicorn>=0.24.0",
+        "sqlalchemy>=2.0.23",
+        "flask>=2.3.3",
+        "requests>=2.31.0",
     ],
-    author="Axhraf KHABAR",
-    author_email="khabarachraf@email.com",
-    description="User Management Application",
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
-    ],
-    python_requires='>=3.6',
+    extras_require={
+        "test": [
+            "pytest>=7.4.0",
+            "robotframework>=6.1.1",
+            "robotframework-requests>=0.9.4",
+        ],
+    },
+    author="Votre Nom",
+    author_email="votre.email@example.com",
+    description="Application de gestion d'utilisateurs avec API FastAPI",
+    keywords="fastapi users management",
 )

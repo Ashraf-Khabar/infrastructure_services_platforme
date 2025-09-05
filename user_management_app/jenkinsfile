@@ -16,6 +16,7 @@ pipeline {
         PYTHON_PACKAGE_VERSION = '1.0.0'
         
         EMAIL_TEMPLATE_PATH = "${WORKSPACE}/internal_apps_monitoring/mail/email-template.html"
+        ROBOT_REPORTS_DIR = "${WORKSPACE}/robot_reports"
     }
 
     stages {
@@ -45,6 +46,16 @@ pipeline {
                 stage('Test Dependencies') {
                     steps {
                         sh "${VENV_PATH}/bin/pip install pytest requests"
+                    }
+                }
+                stage('Robot Framework Dependencies') {
+                    steps {
+                        sh """
+                            ${VENV_PATH}/bin/pip install robotframework
+                            ${VENV_PATH}/bin/pip install robotframework-requests
+                            ${VENV_PATH}/bin/pip install robotframework-databaselibrary
+                            ${VENV_PATH}/bin/pip install psycopg2-binary
+                        """
                     }
                 }
             }
@@ -95,6 +106,31 @@ pipeline {
                 stage('Unit Tests') {
                     steps {
                         sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_unit.py -v --tb=short"
+                    }
+                }
+
+                stage('Robot Framework Tests') {
+                    steps {
+                        script {
+                            sh """
+                                mkdir -p ${ROBOT_REPORTS_DIR}
+                                cd ${APP_DIR}/robot_tests
+                                ${VENV_PATH}/bin/robot \
+                                    -d ${ROBOT_REPORTS_DIR} \
+                                    -x robotxunit.xml \
+                                    *.robot
+                            """
+                        }
+                    }
+                    
+                    post {
+                        always {
+                            robot outputPath: "${ROBOT_REPORTS_DIR}", \
+                                  outputFileName: "robotxunit.xml", \
+                                  reportFileName: "report.html", \
+                                  logFileName: "log.html", \
+                                  disableArchiveOutput: false
+                        }
                     }
                 }
             }
@@ -171,6 +207,12 @@ pipeline {
                     # Nettoyage des processus Python de l'application seulement
                     pkill -f "python.*app\\.py" 2>/dev/null || true
                 """
+
+                // Ajouter les résultats Robot Framework au rapport
+                robot outputPath: "${ROBOT_REPORTS_DIR}", \
+                      outputFileName: "robotxunit.xml", \
+                      reportFileName: "report.html", \
+                      logFileName: "log.html"
 
                 def statusColor
                 if (BUILD_STATUS == 'SUCCESS') {

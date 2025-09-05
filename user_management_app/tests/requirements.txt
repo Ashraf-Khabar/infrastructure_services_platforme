@@ -1,3 +1,7 @@
 pytest==7.4.0
 requests==2.31.0*
 setuptools
+pytest-cov==4.1.0
+requests==2.32.3
+coverage==7.6.7
+python-dotenv==1.0.1

@@ -202,4 +202,4 @@ volumes:
   keycloak_data:
   app_postgres_data:
   prometheus_data:
-  pgadmin_data:  # Nouveau volume pour pgAdmin
+  pgadmin_data:
