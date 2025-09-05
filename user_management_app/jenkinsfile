@@ -7,6 +7,9 @@ pipeline {
         VENV_PATH = "${WORKSPACE}/venv"
         APP_DIR = "${WORKSPACE}/user_management_app"
         API_PID_FILE = "/tmp/api.pid"
+        // Configuration email
+        EMAIL_RECIPIENTS = 'test@example.com' // Modifier avec l'email de test
+        BUILD_STATUS = "UNKNOWN"
     }
 
     stages {
@@ -51,10 +54,13 @@ pipeline {
                         echo \$! > ${API_PID_FILE}
                     """
                     
+                    // Attendre que l'API soit démarrée
                     timeout(time: 30, unit: 'SECONDS') {
                         waitUntil {
                             try {
-                                sh "curl -f http://localhost:5000/health > /dev/null 2>&1"
+                                sh """
+                                    curl -f http://localhost:5000/health > /dev/null 2>&1
+                                """
                                 echo "API is ready!"
                                 return true
                             } catch (Exception e) {
@@ -74,11 +80,13 @@ pipeline {
                         sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_api.py -v --tb=short"
                     }
                 }
+
                 stage('Model Tests') {
                     steps {
                         sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_models.py -v --tb=short"
                     }
                 }
+
                 stage('Unit Tests') {
                     steps {
                         sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_unit.py -v --tb=short"
@@ -107,13 +115,49 @@ pipeline {
     post {
         always {
             script {
+                // Déterminer le statut du build
+                BUILD_STATUS = currentBuild.currentResult
+                
+                // Nettoyage
                 sh """
                     pkill -f "python app.py" 2>/dev/null || true
                     pkill -f "uvicorn" 2>/dev/null || true
                     rm -f ${API_PID_FILE} 2>/dev/null || true
                 """
+                
+                // Envoyer l'email de notification (version simplifiée)
+                emailext (
+                    subject: "Build ${BUILD_STATUS}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                    body: """
+                        <h2>Résultats du build Jenkins</h2>
+                        <p><strong>Job:</strong> ${env.JOB_NAME}</p>
+                        <p><strong>Numéro de build:</strong> ${env.BUILD_NUMBER}</p>
+                        <p><strong>Statut:</strong> ${BUILD_STATUS}</p>
+                        <p><strong>Durée:</strong> ${currentBuild.durationString}</p>
+                        <p><strong>URL du build:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                        
+                        <h3>Résumé des tests:</h3>
+                        <p>Consultez les logs détaillés dans Jenkins pour plus d'informations.</p>
+                        
+                        <p>Consultez MailHog pour voir cet email: http://mail.host.internal:8025</p>
+                    """,
+                    to: env.EMAIL_RECIPIENTS,
+                    mimeType: 'text/html'
+                )
             }
             cleanWs()
+        }
+        
+        success {
+            echo "Build réussi - Email de notification envoyé"
+        }
+        
+        failure {
+            echo "Build échoué - Email de notification envoyé"
+        }
+        
+        unstable {
+            echo "Build instable - Email de notification envoyé"
         }
     }
 }
