@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rapport de Build Jenkins</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        .header {
+            background: linear-gradient(135deg, #2c3e50, #4a6572);
+            color: white;
+            padding: 25px;
+            border-radius: 8px 8px 0 0;
+            text-align: center;
+        }
+        .content {
+            background-color: white;
+            padding: 25px;
+            border-radius: 0 0 8px 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 10px 0;
+            color: white;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .info-card {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #4a6572;
+        }
+        .artifact-section {
+            background-color: #e8f4f8;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            border-left: 4px solid #17a2b8;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+        a {
+            color: #007bff;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .btn:hover {
+            background-color: #0056b3;
+            text-decoration: none;
+        }
+        .timeline {
+            margin: 20px 0;
+            position: relative;
+        }
+        .timeline:before {
+            content: '';
+            position: absolute;
+            left: 10px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background-color: #dee2e6;
+        }
+        .timeline-item {
+            position: relative;
+            padding-left: 30px;
+            margin-bottom: 15px;
+        }
+        .timeline-item:before {
+            content: '';
+            position: absolute;
+            left: 4px;
+            top: 5px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #17a2b8;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Rapport de Build Jenkins</h1>
+        <div class="status-badge" style="background-color: ${STATUS_COLOR};">Statut: ${BUILD_STATUS}</div>
+    </div>
+    
+    <div class="content">
+        <h2>Détails du Build</h2>
+        
+        <div class="info-grid">
+            <div class="info-card">
+                <strong>Job:</strong><br>
+                ${JOB_NAME}
+            </div>
+            <div class="info-card">
+                <strong>Numéro de build:</strong><br>
+                ${BUILD_NUMBER}
+            </div>
+            <div class="info-card">
+                <strong>Durée:</strong><br>
+                ${BUILD_DURATION}
+            </div>
+            <div class="info-card">
+                <strong>Environnement:</strong><br>
+                Python User Management App
+            </div>
+        </div>
+        
+        <h3>Résumé de l'exécution</h3>
+        <div class="timeline">
+            <div class="timeline-item">
+                <strong>Setup Python Environment</strong> - Environnement Python configuré avec succès
+            </div>
+            <div class="timeline-item">
+                <strong>Installation des dépendances</strong> - Dépendances API, Client et Tests installées
+            </div>
+            <div class="timeline-item">
+                <strong>Démarrage du serveur API</strong> - API démarrée et vérifiée
+            </div>
+            <div class="timeline-item">
+                <strong>Exécution des tests</strong> - Tests API, Modèles et Unitaires exécutés
+            </div>
+            <div class="timeline-item">
+                <strong>Construction du package</strong> - Package Python créé avec setuptools et wheel
+            </div>
+            <div class="timeline-item">
+                <strong>Déploiement vers Nexus</strong> - Artefacts déployés sur le repository
+            </div>
+        </div>
+        
+        <div class="artifact-section">
+            <h3>Artefacts Déployés</h3>
+            <p>Le package Python a été déployé avec succès sur Nexus:</p>
+            <p><strong>URL:</strong> <a href="${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/">${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/</a></p>
+            <p><strong>Version:</strong> ${PYTHON_PACKAGE_VERSION}</p>
+            <a href="${BUILD_URL}" class="btn">Voir les détails du build</a>
+        </div>
+        
+        <div class="footer">
+            <p>Ceci est un message automatique généré par Jenkins. Merci de ne pas y répondre.</p>
+            <p>Consultez MailHog pour voir cet email: <a href="http://mail.host.internal:8025">http://mail.host.internal:8025</a></p>
+            <p>© ${CURRENT_YEAR} - User Management Application</p>
+        </div>
+    </div>
+</body>
+</html>
