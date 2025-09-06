@@ -1,0 +1,30 @@
+{
+  "title": "User Management App Metrics",
+  "tags": ["python", "fastapi", "flask"],
+  "panels": [
+    {
+      "title": "API Response Times",
+      "type": "graph",
+      "targets": [{
+        "expr": "rate(http_request_duration_seconds_sum{job=\"user-management-api\"}[5m]) / rate(http_request_duration_seconds_count{job=\"user-management-api\"}[5m])",
+        "legendFormat": "Avg Response Time"
+      }]
+    },
+    {
+      "title": "HTTP Requests Rate",
+      "type": "graph", 
+      "targets": [{
+        "expr": "rate(http_requests_total{job=\"user-management-api\"}[5m])",
+        "legendFormat": "{{method}} {{endpoint}}"
+      }]
+    },
+    {
+      "title": "Active Users",
+      "type": "stat",
+      "targets": [{
+        "expr": "user_management_active_users",
+        "legendFormat": "Active Users"
+      }]
+    }
+  ]
+}

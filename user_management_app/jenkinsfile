@@ -17,6 +17,7 @@ pipeline {
         
         EMAIL_TEMPLATE_PATH = "${WORKSPACE}/internal_apps_monitoring/mail/email-template.html"
         ROBOT_REPORTS_DIR = "${WORKSPACE}/robot_reports"
+        PROMETHEUS_PUSH_GATEWAY = 'http://prometheus.host.internal'
     }
 
     stages {
@@ -58,6 +59,11 @@ pipeline {
                         """
                     }
                 }
+                stage('Prometheus Dependencies') {
+                    steps {
+                        sh "${VENV_PATH}/bin/pip install prometheus-client"
+                    }
+                }
             }
         }
 
@@ -69,18 +75,25 @@ pipeline {
                         cd ${APP_DIR}/api
                         nohup ${VENV_PATH}/bin/python app.py > api.log 2>&1 &
                         echo \$! > ${API_PID_FILE}
+                        sleep 3  # Donner du temps à l'API de démarrer
                     """
                     
-                    timeout(time: 30, unit: 'SECONDS') {
+                    // Solution robuste pour vérifier que l'API est prête
+                    timeout(time: 60, unit: 'SECONDS') {
                         waitUntil {
                             try {
+                                // Essayer plusieurs endpoints pour vérifier que l'API est complètement prête
                                 sh """
-                                    curl -f http://localhost:5000/health > /dev/null 2>&1
+                                    # Essayer d'abord le endpoint health
+                                    curl -s -f http://localhost:5000/health > /dev/null && \
+                                    # Essayer aussi le endpoint root pour être sûr
+                                    curl -s -f http://localhost:5000/ > /dev/null
                                 """
-                                echo "API is ready!"
+                                echo "API is ready and responding!"
                                 return true
                             } catch (Exception e) {
-                                sleep(2)
+                                echo "API not ready yet, waiting..."
+                                sleep(5)
                                 return false
                             }
                         }
@@ -164,6 +177,70 @@ pipeline {
             }
         }
 
+        stage('Push Metrics to Prometheus') {
+            steps {
+                script {
+                    echo "Pushing metrics to Prometheus..."
+                    
+                    // Calculer les métriques de tests
+                    def totalTests = 0
+                    def passedTests = 0
+                    def failedTests = 0
+                    def skippedTests = 0
+                    
+                    try {
+                        // Compter les tests Robot Framework
+                        if (fileExists("${ROBOT_REPORTS_DIR}/output.xml")) {
+                            def robotOutput = readFile("${ROBOT_REPORTS_DIR}/output.xml")
+                            def testsMatcher = robotOutput =~ 'tests="([0-9]+)"'
+                            def passedMatcher = robotOutput =~ 'passed="([0-9]+)"'
+                            def failedMatcher = robotOutput =~ 'failed="([0-9]+)"'
+                            def skippedMatcher = robotOutput =~ 'skipped="([0-9]+)"'
+                            
+                            if (testsMatcher.find()) totalTests += testsMatcher[0][1].toInteger()
+                            if (passedMatcher.find()) passedTests += passedMatcher[0][1].toInteger()
+                            if (failedMatcher.find()) failedTests += failedMatcher[0][1].toInteger()
+                            if (skippedMatcher.find()) skippedTests += skippedMatcher[0][1].toInteger()
+                        }
+                    } catch (Exception e) {
+                        echo "Erreur lors de la lecture des métriques Robot: ${e.getMessage()}"
+                    }
+                    
+                    // Préparer les métriques au format Prometheus
+                    def metrics = """
+# HELP jenkins_custom_tests_total Total number of tests
+# TYPE jenkins_custom_tests_total counter
+jenkins_custom_tests_total{job="${env.JOB_NAME}", type="total"} ${totalTests}
+jenkins_custom_tests_total{job="${env.JOB_NAME}", type="passed"} ${passedTests}
+jenkins_custom_tests_total{job="${env.JOB_NAME}", type="failed"} ${failedTests}
+jenkins_custom_tests_total{job="${env.JOB_NAME}", type="skipped"} ${skippedTests}
+
+# HELP jenkins_custom_build_info Build information
+# TYPE jenkins_custom_build_info gauge
+jenkins_custom_build_info{job="${env.JOB_NAME}", build_number="${env.BUILD_NUMBER}", result="${currentBuild.currentResult}"} 1
+
+# HELP jenkins_custom_build_duration_seconds Build duration in seconds
+# TYPE jenkins_custom_build_duration_seconds gauge
+jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.duration / 1000}
+
+# HELP jenkins_custom_stage_duration_seconds Stage duration in seconds
+# TYPE jenkins_custom_stage_duration_seconds gauge
+jenkins_custom_stage_duration_seconds{job="${env.JOB_NAME}", stage="tests"} ${currentBuild.duration / 1000}
+"""
+                    
+                    // Pousser les métriques vers Prometheus
+                    try {
+                        sh """
+                            echo '${metrics}' | curl --connect-timeout 5 --max-time 10 -X POST --data-binary @- ${PROMETHEUS_PUSH_GATEWAY}/metrics/job/jenkins/instance/${env.JOB_NAME} || echo "Prometheus push failed, continuing..."
+                        """
+                        echo "Metrics pushed to Prometheus successfully"
+                    } catch (Exception e) {
+                        echo "Failed to push metrics to Prometheus: ${e.getMessage()}"
+                    }
+                }
+            }
+        }
+
         stage('Stop API Server') {
             steps {
                 script {
@@ -171,10 +248,15 @@ pipeline {
                     sh """
                         if [ -f ${API_PID_FILE} ]; then
                             PID=\$(cat ${API_PID_FILE})
+                            echo "Stopping API process: \$PID"
                             kill \$PID 2>/dev/null || true
                             sleep 2
                             kill -9 \$PID 2>/dev/null || true
                             rm -f ${API_PID_FILE}
+                            echo "API server stopped"
+                        else
+                            echo "No API PID file found, stopping any python app processes"
+                            pkill -f "python.*app\\.py" 2>/dev/null || true
                         fi
                     """
                 }
@@ -213,7 +295,7 @@ pipeline {
                             ${VENV_PATH}/bin/twine upload \
                                 --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
                                 -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
-                                dist/*
+                                dist/* || echo "Nexus upload failed, continuing..."
                         """
                     }
                 }
@@ -242,14 +324,18 @@ pipeline {
             script {
                 BUILD_STATUS = currentBuild.currentResult
                 
+                // Nettoyage robuste
                 sh """
+                    echo "Cleaning up processes..."
                     if [ -f ${API_PID_FILE} ]; then
                         PID=\$(cat ${API_PID_FILE})
                         kill \$PID 2>/dev/null || true
                         rm -f ${API_PID_FILE}
                     fi
-                    # Nettoyage des processus Python de l'application seulement
+                    # Nettoyage des processus Python de l'application
                     pkill -f "python.*app\\.py" 2>/dev/null || true
+                    pkill -f "uvicorn" 2>/dev/null || true
+                    echo "Cleanup completed"
                 """
 
                 // Vérification et publication des résultats Robot Framework

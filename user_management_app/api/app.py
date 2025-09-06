@@ -9,6 +9,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+REQUEST_COUNT = Counter('http_requests_total', 'Total HTTP Requests', ['method', 'endpoint', 'status'])
+REQUEST_DURATION = Histogram('http_request_duration_seconds', 'HTTP request duration', ['method', 'endpoint'])
+ACTIVE_USERS = Gauge('user_management_active_users', 'Number of active users')
+
 app = FastAPI(
     title="User Management API", 
     version="1.0.0",
@@ -64,6 +68,33 @@ def get_password_hash(password):
 
 def verify_password(plain_password, hashed_password):
     return get_password_hash(plain_password) == hashed_password
+
+
+@app.middleware("http")
+async def monitor_requests(request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    
+    REQUEST_COUNT.labels(
+        method=request.method,
+        endpoint=request.url.path,
+        status=response.status_code
+    ).inc()
+    
+    REQUEST_DURATION.labels(
+        method=request.method,
+        endpoint=request.url.path
+    ).observe(process_time)
+    
+    return response
+
+@app.get('/metrics')
+async def metrics():
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST
+    )
 
 @app.get("/")
 def read_root():

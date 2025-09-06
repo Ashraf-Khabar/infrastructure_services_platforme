@@ -69,6 +69,7 @@ services:
       - JENKINS_SMTP_PORT=1025
       - JENKINS_SMTP_AUTH=false
       - JENKINS_SMTP_SSL=false
+      - PROMETHEUS_ENDPOINT=http://prometheus.host.internal
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.jenkins.rule=Host(`jenkins.host.internal`)"
