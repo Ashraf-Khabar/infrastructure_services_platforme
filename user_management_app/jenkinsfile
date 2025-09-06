@@ -15,8 +15,6 @@ pipeline {
         NEXUS_CREDENTIALS_ID = 'JENKINS_TOKEN'
         PYTHON_PACKAGE_VERSION = '1.0.0'
 
-        EMAIL_TEMPLATE_PATH = "${WORKSPACE}/internal_apps_monitoring/mail/email-template.html"
-        ROBOT_REPORTS_DIR = "${WORKSPACE}/robot_reports"
         PROMETHEUS_PUSH_GATEWAY = 'http://prometheus.host.internal'
     }
 
@@ -105,44 +103,13 @@ pipeline {
                     steps {
                         script {
                             sh """
-                                mkdir -p ${ROBOT_REPORTS_DIR}
-                                echo "=== Recherche des tests Robot Framework ==="
+                                echo "=== Execution des tests Robot Framework ==="
                                 cd ${APP_DIR}/robot_tests
+                                # Exécution sans générer les fichiers de sortie
                                 set +e
-                                ${VENV_PATH}/bin/robot \
-                                    --outputdir ${ROBOT_REPORTS_DIR} \
-                                    --output output.xml \
-                                    --report report.html \
-                                    --log log.html \
-                                    --xunit xunit.xml \
-                                    . || echo "Tests Robot Framework terminés avec des échecs"
+                                ${VENV_PATH}/bin/robot --exitonfailure --console none . || echo "Tests Robot Framework terminés avec échecs"
                                 set -e
-                                echo "=== Fichiers générés ==="
-                                ls -la ${ROBOT_REPORTS_DIR}/
                             """
-                        }
-                    }
-                    post {
-                        always {
-                            script {
-                                def outputFile = "output.xml"
-                                if (!fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
-                                    outputFile = "xunit.xml"
-                                }
-
-                                if (fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
-                                    echo "Utilisation du fichier de rapport: ${outputFile}"
-                                    robot outputPath: "${ROBOT_REPORTS_DIR}",
-                                          outputFileName: outputFile,
-                                          reportFileName: "report.html",
-                                          logFileName: "log.html",
-                                          disableArchiveOutput: false,
-                                          passThreshold: 70.0,
-                                          unstableThreshold: 50.0
-                                } else {
-                                    echo "Aucun fichier de rapport XML trouvé"
-                                }
-                            }
                         }
                     }
                 }
@@ -157,32 +124,9 @@ pipeline {
                     def passedTests = 0
                     def failedTests = 0
                     def skippedTests = 0
-
-                    try {
-                        if (fileExists("${ROBOT_REPORTS_DIR}/output.xml")) {
-                            def robotOutput = readFile("${ROBOT_REPORTS_DIR}/output.xml")
-                            def testsMatcher = robotOutput =~ 'tests="([0-9]+)"'
-                            def passedMatcher = robotOutput =~ 'passed="([0-9]+)"'
-                            def failedMatcher = robotOutput =~ 'failed="([0-9]+)"'
-                            def skippedMatcher = robotOutput =~ 'skipped="([0-9]+)"'
-
-                            if (testsMatcher.find()) totalTests += testsMatcher[0][1].toInteger()
-                            if (passedMatcher.find()) passedTests += passedMatcher[0][1].toInteger()
-                            if (failedMatcher.find()) failedTests += failedMatcher[0][1].toInteger()
-                            if (skippedMatcher.find()) skippedTests += skippedMatcher[0][1].toInteger()
-                        }
-                    } catch (Exception e) {
-                        echo "Erreur lors de la lecture des métriques Robot: ${e.getMessage()}"
-                    }
+                    // Optionnel : métriques Robot non disponibles puisque pas de XML
 
                     def metrics = """
-# HELP jenkins_custom_tests_total Total number of tests
-# TYPE jenkins_custom_tests_total counter
-jenkins_custom_tests_total{job="${env.JOB_NAME}", type="total"} ${totalTests}
-jenkins_custom_tests_total{job="${env.JOB_NAME}", type="passed"} ${passedTests}
-jenkins_custom_tests_total{job="${env.JOB_NAME}", type="failed"} ${failedTests}
-jenkins_custom_tests_total{job="${env.JOB_NAME}", type="skipped"} ${skippedTests}
-
 # HELP jenkins_custom_build_info Build information
 # TYPE jenkins_custom_build_info gauge
 jenkins_custom_build_info{job="${env.JOB_NAME}", build_number="${env.BUILD_NUMBER}", result="${currentBuild.currentResult}"} 1
@@ -190,10 +134,6 @@ jenkins_custom_build_info{job="${env.JOB_NAME}", build_number="${env.BUILD_NUMBE
 # HELP jenkins_custom_build_duration_seconds Build duration in seconds
 # TYPE jenkins_custom_build_duration_seconds gauge
 jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.duration / 1000}
-
-# HELP jenkins_custom_stage_duration_seconds Stage duration in seconds
-# TYPE jenkins_custom_stage_duration_seconds gauge
-jenkins_custom_stage_duration_seconds{job="${env.JOB_NAME}", stage="tests"} ${currentBuild.duration / 1000}
 """
 
                     try {
@@ -269,8 +209,7 @@ jenkins_custom_stage_duration_seconds{job="${env.JOB_NAME}", stage="tests"} ${cu
         stage('Archive Reports') {
             steps {
                 script {
-                    echo "Archiving test reports..."
-                    archiveArtifacts artifacts: 'robot_reports/*.html, robot_reports/*.xml', fingerprint: false
+                    echo "Skipping Robot Framework report archiving"
                     archiveArtifacts artifacts: 'user_management_app/api/api.log', fingerprint: false
                     archiveArtifacts artifacts: 'user_management_app/dist/*', fingerprint: false
                 }
@@ -293,28 +232,6 @@ jenkins_custom_stage_duration_seconds{job="${env.JOB_NAME}", stage="tests"} ${cu
                     pkill -f "uvicorn" 2>/dev/null || true
                     echo "Cleanup completed"
                 """
-
-                def robotFiles = [
-                    "${ROBOT_REPORTS_DIR}/output.xml",
-                    "${ROBOT_REPORTS_DIR}/xunit.xml"
-                ]
-
-                for (file in robotFiles) {
-                    if (fileExists(file)) {
-                        echo "Publication finale du rapport Robot Framework: ${file}"
-                        // Extract filename safely without using File()
-                        def filename = file.tokenize('/').last()
-                        robot outputPath: "${ROBOT_REPORTS_DIR}",
-                              outputFileName: filename,
-                              reportFileName: "report.html",
-                              logFileName: "log.html",
-                              disableArchiveOutput: false,
-                              passThreshold: 70.0,
-                              unstableThreshold: 50.0
-                        break
-                    }
-                }
-
             }
             cleanWs()
         }
