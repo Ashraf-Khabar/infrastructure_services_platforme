@@ -15,7 +15,7 @@ pipeline {
 
         ROBOT_REPORTS_DIR = "${WORKSPACE}/robot_reports"
         PROMETHEUS_PUSH_GATEWAY = 'http://prometheus.host.internal'
-        EMAIL_TEMPLATE_PATH = "${WORKSPACE}/internal_apps_monitoring/mail/email-template.html"
+        EMAIL_TEMPLATE_PATH = "${WORKSPACE}/email-template.html"
     }
 
     stages {
