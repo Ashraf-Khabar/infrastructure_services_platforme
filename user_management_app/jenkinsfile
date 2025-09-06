@@ -227,8 +227,11 @@ pipeline {
                     // Archiver les rapports Robot Framework
                     archiveArtifacts artifacts: 'robot_reports/*.html, robot_reports/*.xml', fingerprint: false
                     
-                    // Archiver les logs de l'API
-                    archiveArtifacts artifacts: 'api.log', fingerprint: false
+                    // Archiver les logs de l'API (chemin corrigé)
+                    archiveArtifacts artifacts: 'user_management_app/api/api.log', fingerprint: false
+                    
+                    // Archiver aussi les packages générés
+                    archiveArtifacts artifacts: 'user_management_app/dist/*', fingerprint: false
                 }
             }
         }
