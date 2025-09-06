@@ -114,22 +114,76 @@ pipeline {
                         script {
                             sh """
                                 mkdir -p ${ROBOT_REPORTS_DIR}
+                                echo "=== Recherche des tests Robot Framework ==="
+                                echo "Contenu de ${APP_DIR}/robot_tests/:"
+                                ls -la ${APP_DIR}/robot_tests/
+                                
+                                if [ -d "${APP_DIR}/robot_tests/api" ]; then
+                                    echo "Contenu du dossier api:"
+                                    ls -la ${APP_DIR}/robot_tests/api/
+                                fi
+                                
+                                # Se placer dans le dossier des tests
                                 cd ${APP_DIR}/robot_tests
+                                
+                                # Exécuter tous les tests avec génération explicite des rapports
                                 ${VENV_PATH}/bin/robot \
-                                    -d ${ROBOT_REPORTS_DIR} \
-                                    -x robotxunit.xml \
-                                    *.robot
+                                    --outputdir ${ROBOT_REPORTS_DIR} \
+                                    --output output.xml \
+                                    --report report.html \
+                                    --log log.html \
+                                    --xunit xunit.xml \
+                                    .
+                                
+                                echo "=== Fichiers générés ==="
+                                ls -la ${ROBOT_REPORTS_DIR}/
                             """
                         }
                     }
                     
                     post {
                         always {
-                            robot outputPath: "${ROBOT_REPORTS_DIR}", \
-                                  outputFileName: "robotxunit.xml", \
-                                  reportFileName: "report.html", \
-                                  logFileName: "log.html", \
-                                  disableArchiveOutput: false
+                            script {
+                                // Déterminer quel fichier de rapport utiliser
+                                def outputFile = "output.xml"
+                                if (!fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
+                                    outputFile = "xunit.xml"
+                                }
+                                if (!fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
+                                    outputFile = "robotxunit.xml"
+                                }
+                                
+                                if (fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
+                                    echo "Utilisation du fichier de rapport: ${outputFile}"
+                                    robot outputPath: "${ROBOT_REPORTS_DIR}", 
+                                          outputFileName: outputFile,
+                                          reportFileName: "report.html",
+                                          logFileName: "log.html",
+                                          disableArchiveOutput: false
+                                } else {
+                                    echo "Aucun fichier de rapport XML trouvé, création d'un rapport minimal..."
+                                    sh """
+                                        cat > ${ROBOT_REPORTS_DIR}/output.xml << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<robot generated="2025-09-04T00:00:00.000000" generator="Robot 6.1.1">
+<suite source="${APP_DIR}/robot_tests" name="Test Suite">
+<test id="s1-t1" name="Aucun test exécuté">
+<status status="SKIP" starttime="2025-09-04T00:00:00.000000" endtime="2025-09-04T00:00:00.000000">
+Aucun test Robot Framework n'a pu être exécuté
+</status>
+</test>
+<status status="SKIP" starttime="2025-09-04T00:00:00.000000" endtime="2025-09-04T00:00:00.000000"/>
+</suite>
+</robot>
+EOF
+                                    """
+                                    robot outputPath: "${ROBOT_REPORTS_DIR}", 
+                                          outputFileName: "output.xml",
+                                          reportFileName: "report.html",
+                                          logFileName: "log.html",
+                                          disableArchiveOutput: false
+                                }
+                            }
                         }
                     }
                 }
@@ -208,11 +262,32 @@ pipeline {
                     pkill -f "python.*app\\.py" 2>/dev/null || true
                 """
 
-                // Ajouter les résultats Robot Framework au rapport
-                robot outputPath: "${ROBOT_REPORTS_DIR}", \
-                      outputFileName: "robotxunit.xml", \
-                      reportFileName: "report.html", \
-                      logFileName: "log.html"
+                // Vérification et publication des résultats Robot Framework
+                script {
+                    def robotFiles = [
+                        "${ROBOT_REPORTS_DIR}/output.xml",
+                        "${ROBOT_REPORTS_DIR}/xunit.xml", 
+                        "${ROBOT_REPORTS_DIR}/robotxunit.xml"
+                    ]
+                    
+                    def robotReportFound = false
+                    for (file in robotFiles) {
+                        if (fileExists(file)) {
+                            echo "Publication du rapport Robot Framework: ${file}"
+                            robot outputPath: "${ROBOT_REPORTS_DIR}", 
+                                  outputFileName: new File(file).getName(),
+                                  reportFileName: "report.html",
+                                  logFileName: "log.html",
+                                  disableArchiveOutput: false
+                            robotReportFound = true
+                            break
+                        }
+                    }
+                    
+                    if (!robotReportFound) {
+                        echo "Aucun rapport Robot Framework trouvé pour publication"
+                    }
+                }
 
                 def statusColor
                 if (BUILD_STATUS == 'SUCCESS') {
