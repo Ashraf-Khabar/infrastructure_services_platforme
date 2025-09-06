@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from typing import List
 import hashlib
 import logging
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from fastapi import FastAPI, Response
 
 # Configurer le logging
 logging.basicConfig(level=logging.INFO)
