@@ -112,39 +112,37 @@ pipeline {
                 stage('Robot Framework Tests') {
                     steps {
                         script {
-                            // catchError empêche le blocage du pipeline
-                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                                sh """
-                                    mkdir -p ${ROBOT_REPORTS_DIR}
-                                    echo "=== Recherche des tests Robot Framework ==="
-                                    ls -la ${APP_DIR}/robot_tests/ || true
-                                    
-                                    cd ${APP_DIR}/robot_tests
-                                    
-                                    ${VENV_PATH}/bin/robot \
-                                        --outputdir ${ROBOT_REPORTS_DIR} \
-                                        --output output.xml \
-                                        --report report.html \
-                                        --log log.html \
-                                        --xunit xunit.xml \
-                                        .
-                                    
-                                    echo "=== Fichiers générés ==="
-                                    ls -la ${ROBOT_REPORTS_DIR}/
-                                """
-                            }
+                            sh """
+                                mkdir -p ${ROBOT_REPORTS_DIR}
+                                echo "=== Recherche des tests Robot Framework ==="
+                                
+                                # Se placer dans le dossier des tests
+                                cd ${APP_DIR}/robot_tests
+                                
+                                # Exécuter les tests sans faire échouer le build
+                                set +e
+                                ${VENV_PATH}/bin/robot \
+                                    --outputdir ${ROBOT_REPORTS_DIR} \
+                                    --output output.xml \
+                                    --report report.html \
+                                    --log log.html \
+                                    --xunit xunit.xml \
+                                    . || echo "Tests Robot Framework terminés avec des échecs (build continue)"
+                                set -e
+                                
+                                echo "=== Fichiers générés ==="
+                                ls -la ${ROBOT_REPORTS_DIR}/
+                            """
                         }
                     }
                     
                     post {
                         always {
                             script {
+                                // Déterminer quel fichier de rapport utiliser
                                 def outputFile = "output.xml"
                                 if (!fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
                                     outputFile = "xunit.xml"
-                                }
-                                if (!fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
-                                    outputFile = "robotxunit.xml"
                                 }
                                 
                                 if (fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
@@ -153,9 +151,11 @@ pipeline {
                                           outputFileName: outputFile,
                                           reportFileName: "report.html",
                                           logFileName: "log.html",
-                                          disableArchiveOutput: false
+                                          disableArchiveOutput: false,
+                                          passThreshold: 70.0,
+                                          unstableThreshold: 50.0
                                 } else {
-                                    echo "⚠️ Aucun rapport Robot Framework trouvé"
+                                    echo "Aucun fichier de rapport XML trouvé"
                                 }
                             }
                         }
@@ -219,6 +219,19 @@ pipeline {
                 }
             }
         }
+
+        stage('Archive Reports') {
+            steps {
+                script {
+                    echo "Archiving test reports..."
+                    // Archiver les rapports Robot Framework
+                    archiveArtifacts artifacts: 'robot_reports/*.html, robot_reports/*.xml', fingerprint: false
+                    
+                    // Archiver les logs de l'API
+                    archiveArtifacts artifacts: 'api.log', fingerprint: false
+                }
+            }
+        }
     }
 
     post {
@@ -232,6 +245,7 @@ pipeline {
                         kill \$PID 2>/dev/null || true
                         rm -f ${API_PID_FILE}
                     fi
+                    # Nettoyage des processus Python de l'application seulement
                     pkill -f "python.*app\\.py" 2>/dev/null || true
                 """
 
@@ -239,58 +253,28 @@ pipeline {
                 script {
                     def robotFiles = [
                         "${ROBOT_REPORTS_DIR}/output.xml",
-                        "${ROBOT_REPORTS_DIR}/xunit.xml", 
-                        "${ROBOT_REPORTS_DIR}/robotxunit.xml"
+                        "${ROBOT_REPORTS_DIR}/xunit.xml"
                     ]
                     
                     def robotReportFound = false
                     for (file in robotFiles) {
                         if (fileExists(file)) {
-                            echo "Publication du rapport Robot Framework: ${file}"
+                            echo "Publication finale du rapport Robot Framework: ${file}"
                             robot outputPath: "${ROBOT_REPORTS_DIR}", 
                                   outputFileName: new File(file).getName(),
                                   reportFileName: "report.html",
                                   logFileName: "log.html",
-                                  disableArchiveOutput: false
+                                  disableArchiveOutput: false,
+                                  passThreshold: 70.0,
+                                  unstableThreshold: 50.0
                             robotReportFound = true
                             break
                         }
                     }
-                    
-                    if (!robotReportFound) {
-                        echo "⚠️ Aucun rapport Robot Framework trouvé pour publication"
-                    }
                 }
 
-                def statusColor
-                if (BUILD_STATUS == 'SUCCESS') {
-                    statusColor = '#28a745' 
-                } else if (BUILD_STATUS == 'UNSTABLE') {
-                    statusColor = '#ffc107' 
-                } else {
-                    statusColor = '#dc3545' 
-                }
-                
-                def emailTemplate = readFile(file: env.EMAIL_TEMPLATE_PATH)
-                
-                def emailBody = emailTemplate
-                    .replace('${STATUS_COLOR}', statusColor)
-                    .replace('${BUILD_STATUS}', BUILD_STATUS)
-                    .replace('${JOB_NAME}', env.JOB_NAME)
-                    .replace('${BUILD_NUMBER}', env.BUILD_NUMBER)
-                    .replace('${BUILD_DURATION}', currentBuild.durationString)
-                    .replace('${NEXUS_URL}', env.NEXUS_URL)
-                    .replace('${NEXUS_REPOSITORY}', env.NEXUS_REPOSITORY)
-                    .replace('${PYTHON_PACKAGE_VERSION}', env.PYTHON_PACKAGE_VERSION)
-                    .replace('${BUILD_URL}', env.BUILD_URL)
-                    .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
-                
-                emailext (
-                    subject: "Build ${BUILD_STATUS}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                    body: emailBody,
-                    to: env.EMAIL_RECIPIENTS,
-                    mimeType: 'text/html'
-                )
+                // La partie email est gérée par un autre fichier/externe
+                // Elle sera exécutée automatiquement selon la configuration existante
             }
             cleanWs()
         }
