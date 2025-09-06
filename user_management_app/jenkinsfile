@@ -1,7 +1,5 @@
 pipeline {
-    agent {
-        label 'python_slave_agent'
-    }
+    agent { label 'python_slave_agent' }
 
     environment {
         VENV_PATH = "${WORKSPACE}/venv"
@@ -13,12 +11,15 @@ pipeline {
         NEXUS_URL = 'http://nexus.host.internal'
         NEXUS_REPOSITORY = 'user_management_app'
         NEXUS_CREDENTIALS_ID = 'JENKINS_TOKEN'
+        PYTHON_PACKAGE_VERSION = '1.0.0'
 
         ROBOT_REPORTS_DIR = "${WORKSPACE}/robot_reports"
         PROMETHEUS_PUSH_GATEWAY = 'http://prometheus.host.internal'
+        EMAIL_TEMPLATE_PATH = "${WORKSPACE}/internal_apps_monitoring/mail/email-template.html"
     }
 
     stages {
+
         stage('Setup Python Environment') {
             steps {
                 sh '''
@@ -60,25 +61,19 @@ pipeline {
         stage('Start API Server') {
             steps {
                 script {
-                    echo "Starting API server :"
+                    echo "Starting API server..."
                     sh """
                         cd ${APP_DIR}/api
                         nohup ${VENV_PATH}/bin/python app.py > /dev/null 2>&1 &
                         echo \$! > ${API_PID_FILE}
                         sleep 3
                     """
-
                     timeout(time: 60, unit: 'SECONDS') {
                         waitUntil {
                             try {
-                                sh """
-                                    curl -s -f http://localhost:5000/health > /dev/null && \
-                                    curl -s -f http://localhost:5000/ > /dev/null
-                                """
-                                echo "API is ready and responding!"
+                                sh "curl -s -f http://localhost:5000/health > /dev/null"
                                 return true
                             } catch (Exception e) {
-                                echo "API not ready yet, waiting..."
                                 sleep 5
                                 return false
                             }
@@ -102,36 +97,28 @@ pipeline {
                 stage('Robot Framework Tests') {
                     steps {
                         script {
+                            mkdir -p "${ROBOT_REPORTS_DIR}"
                             sh """
-                                mkdir -p ${ROBOT_REPORTS_DIR}
                                 cd ${APP_DIR}/robot_tests
                                 set +e
-                                ${VENV_PATH}/bin/robot \
-                                    --outputdir ${ROBOT_REPORTS_DIR} \
-                                    --output output.xml \
-                                    --report report.html \
-                                    --log log.html \
-                                    --xunit xunit.xml \
-                                    . || echo "Tests Robot Framework terminés avec échecs"
+                                ${VENV_PATH}/bin/robot --outputdir ${ROBOT_REPORTS_DIR} \
+                                    --output output.xml --report report.html --log log.html --xunit xunit.xml .
                                 set -e
                             """
                         }
-                    }
-                    post {
-                        always {
-                            script {
-                                def outputFile = "${ROBOT_REPORTS_DIR}/output.xml"
-                                if (fileExists(outputFile)) {
-                                    echo "Publication finale du rapport Robot Framework: ${outputFile}"
-                                    robot outputPath: "${ROBOT_REPORTS_DIR}",
-                                          outputFileName: "output.xml",
-                                          reportFileName: "report.html",
-                                          logFileName: "log.html",
-                                          disableArchiveOutput: true, // empêche l’archivage workspace
-                                          passThreshold: 70.0,
-                                          unstableThreshold: 50.0
-                                } else {
-                                    echo "Aucun fichier de rapport Robot trouvé"
+                        post {
+                            always {
+                                script {
+                                    def outputFile = "${ROBOT_REPORTS_DIR}/output.xml"
+                                    if (fileExists(outputFile)) {
+                                        robot outputPath: "${ROBOT_REPORTS_DIR}",
+                                              outputFileName: "output.xml",
+                                              reportFileName: "report.html",
+                                              logFileName: "log.html",
+                                              disableArchiveOutput: true
+                                    } else {
+                                        echo "Aucun fichier Robot Framework trouvé"
+                                    }
                                 }
                             }
                         }
@@ -145,22 +132,15 @@ pipeline {
                 script {
                     echo "Pushing metrics to Prometheus..."
                     def metrics = """
-# HELP jenkins_custom_build_info Build information
+# HELP jenkins_custom_build_info Build info
 # TYPE jenkins_custom_build_info gauge
 jenkins_custom_build_info{job="${env.JOB_NAME}", build_number="${env.BUILD_NUMBER}", result="${currentBuild.currentResult}"} 1
 
-# HELP jenkins_custom_build_duration_seconds Build duration in seconds
+# HELP jenkins_custom_build_duration_seconds Build duration
 # TYPE jenkins_custom_build_duration_seconds gauge
 jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.duration / 1000}
 """
-                    try {
-                        sh """
-                            echo '${metrics}' | curl --connect-timeout 5 --max-time 10 -X POST --data-binary @- ${PROMETHEUS_PUSH_GATEWAY}/metrics/job/jenkins/instance/${env.JOB_NAME} || echo "Prometheus push failed"
-                        """
-                        echo "Metrics pushed to Prometheus successfully"
-                    } catch (Exception e) {
-                        echo "Failed to push metrics to Prometheus: ${e.getMessage()}"
-                    }
+                    sh "echo '${metrics}' | curl -X POST --data-binary @- ${PROMETHEUS_PUSH_GATEWAY}/metrics/job/jenkins/instance/${env.JOB_NAME} || echo 'Prometheus push failed'"
                 }
             }
         }
@@ -168,18 +148,14 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Stop API Server') {
             steps {
                 script {
-                    echo "Stopping API server :"
                     sh """
                         if [ -f ${API_PID_FILE} ]; then
                             PID=\$(cat ${API_PID_FILE})
-                            echo "Stopping API process: \$PID"
                             kill \$PID 2>/dev/null || true
                             sleep 2
                             kill -9 \$PID 2>/dev/null || true
                             rm -f ${API_PID_FILE}
-                            echo "API server stopped"
                         else
-                            echo "No API PID file found, stopping any python app processes"
                             pkill -f "python.*app\\.py" 2>/dev/null || true
                         fi
                     """
@@ -190,7 +166,6 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Build Python Package') {
             steps {
                 script {
-                    echo "Building Python package :"
                     sh '${VENV_PATH}/bin/pip install setuptools wheel'
                     sh """
                         cd ${APP_DIR}
@@ -204,7 +179,6 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Deploy to Nexus') {
             steps {
                 script {
-                    echo "Deploying to Nexus Sonatype : "
                     withCredentials([usernamePassword(
                         credentialsId: env.NEXUS_CREDENTIALS_ID,
                         usernameVariable: 'NEXUS_USER',
@@ -215,21 +189,22 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             ${VENV_PATH}/bin/pip install twine
                             ${VENV_PATH}/bin/twine upload \
                                 --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
-                                -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
-                                dist/* || echo "Nexus upload failed"
+                                -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} dist/*
                         """
                     }
                 }
             }
         }
+
     }
 
     post {
         always {
             script {
                 BUILD_STATUS = currentBuild.currentResult
+
+                // Nettoyage
                 sh """
-                    echo "Cleaning up processes..."
                     if [ -f ${API_PID_FILE} ]; then
                         PID=\$(cat ${API_PID_FILE})
                         kill \$PID 2>/dev/null || true
@@ -237,10 +212,45 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     fi
                     pkill -f "python.*app\\.py" 2>/dev/null || true
                     pkill -f "uvicorn" 2>/dev/null || true
-                    echo "Cleanup completed"
                 """
+
+                // Déterminer couleur selon le statut
+                def statusColor = (BUILD_STATUS == 'SUCCESS') ? '#28a745' :
+                                  (BUILD_STATUS == 'UNSTABLE') ? '#ffc107' : '#dc3545'
+
+                // Charger template HTML (si disponible)
+                def emailBody = (fileExists(env.EMAIL_TEMPLATE_PATH)) ?
+                    readFile(env.EMAIL_TEMPLATE_PATH)
+                        .replace('${STATUS_COLOR}', statusColor)
+                        .replace('${BUILD_STATUS}', BUILD_STATUS)
+                        .replace('${JOB_NAME}', env.JOB_NAME)
+                        .replace('${BUILD_NUMBER}', env.BUILD_NUMBER)
+                        .replace('${BUILD_DURATION}', currentBuild.durationString)
+                        .replace('${NEXUS_URL}', env.NEXUS_URL)
+                        .replace('${NEXUS_REPOSITORY}', env.NEXUS_REPOSITORY)
+                        .replace('${PYTHON_PACKAGE_VERSION}', env.PYTHON_PACKAGE_VERSION)
+                        .replace('${BUILD_URL}', env.BUILD_URL)
+                        .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
+                    :
+                    """
+                    <h2>Build ${BUILD_STATUS}</h2>
+                    <p>Job: ${env.JOB_NAME}</p>
+                    <p>Build Number: ${env.BUILD_NUMBER}</p>
+                    <p>Duration: ${currentBuild.durationString}</p>
+                    <p>Build URL: <a href='${env.BUILD_URL}'>${env.BUILD_URL}</a></p>
+                    """
+
+                // Envoyer le mail
+                emailext (
+                    subject: "Build ${BUILD_STATUS}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                    body: emailBody,
+                    to: env.EMAIL_RECIPIENTS,
+                    mimeType: 'text/html'
+                )
+
+                // Nettoyage workspace
+                cleanWs()
             }
-            cleanWs()
         }
     }
 }
