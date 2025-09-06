@@ -13,8 +13,8 @@ pipeline {
         NEXUS_URL = 'http://nexus.host.internal'
         NEXUS_REPOSITORY = 'user_management_app'
         NEXUS_CREDENTIALS_ID = 'JENKINS_TOKEN'
-        PYTHON_PACKAGE_VERSION = '1.0.0'
 
+        ROBOT_REPORTS_DIR = "${WORKSPACE}/robot_reports"
         PROMETHEUS_PUSH_GATEWAY = 'http://prometheus.host.internal'
     }
 
@@ -63,7 +63,7 @@ pipeline {
                     echo "Starting API server :"
                     sh """
                         cd ${APP_DIR}/api
-                        nohup ${VENV_PATH}/bin/python app.py > api.log 2>&1 &
+                        nohup ${VENV_PATH}/bin/python app.py > /dev/null 2>&1 &
                         echo \$! > ${API_PID_FILE}
                         sleep 3
                     """
@@ -103,13 +103,37 @@ pipeline {
                     steps {
                         script {
                             sh """
-                                echo "=== Execution des tests Robot Framework ==="
+                                mkdir -p ${ROBOT_REPORTS_DIR}
                                 cd ${APP_DIR}/robot_tests
-                                # Exécution sans générer les fichiers de sortie
                                 set +e
-                                ${VENV_PATH}/bin/robot --exitonfailure --console none . || echo "Tests Robot Framework terminés avec échecs"
+                                ${VENV_PATH}/bin/robot \
+                                    --outputdir ${ROBOT_REPORTS_DIR} \
+                                    --output output.xml \
+                                    --report report.html \
+                                    --log log.html \
+                                    --xunit xunit.xml \
+                                    . || echo "Tests Robot Framework terminés avec échecs"
                                 set -e
                             """
+                        }
+                    }
+                    post {
+                        always {
+                            script {
+                                def outputFile = "${ROBOT_REPORTS_DIR}/output.xml"
+                                if (fileExists(outputFile)) {
+                                    echo "Publication finale du rapport Robot Framework: ${outputFile}"
+                                    robot outputPath: "${ROBOT_REPORTS_DIR}",
+                                          outputFileName: "output.xml",
+                                          reportFileName: "report.html",
+                                          logFileName: "log.html",
+                                          disableArchiveOutput: true, // empêche l’archivage workspace
+                                          passThreshold: 70.0,
+                                          unstableThreshold: 50.0
+                                } else {
+                                    echo "Aucun fichier de rapport Robot trouvé"
+                                }
+                            }
                         }
                     }
                 }
@@ -120,12 +144,6 @@ pipeline {
             steps {
                 script {
                     echo "Pushing metrics to Prometheus..."
-                    def totalTests = 0
-                    def passedTests = 0
-                    def failedTests = 0
-                    def skippedTests = 0
-                    // Optionnel : métriques Robot non disponibles puisque pas de XML
-
                     def metrics = """
 # HELP jenkins_custom_build_info Build information
 # TYPE jenkins_custom_build_info gauge
@@ -135,7 +153,6 @@ jenkins_custom_build_info{job="${env.JOB_NAME}", build_number="${env.BUILD_NUMBE
 # TYPE jenkins_custom_build_duration_seconds gauge
 jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.duration / 1000}
 """
-
                     try {
                         sh """
                             echo '${metrics}' | curl --connect-timeout 5 --max-time 10 -X POST --data-binary @- ${PROMETHEUS_PUSH_GATEWAY}/metrics/job/jenkins/instance/${env.JOB_NAME} || echo "Prometheus push failed"
@@ -202,16 +219,6 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 dist/* || echo "Nexus upload failed"
                         """
                     }
-                }
-            }
-        }
-
-        stage('Archive Reports') {
-            steps {
-                script {
-                    echo "Skipping Robot Framework report archiving"
-                    archiveArtifacts artifacts: 'user_management_app/api/api.log', fingerprint: false
-                    archiveArtifacts artifacts: 'user_management_app/dist/*', fingerprint: false
                 }
             }
         }
