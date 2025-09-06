@@ -17,8 +17,8 @@ pipeline {
 
         ROBOT_REPORTS_DIR = "${WORKSPACE}/robot_reports"
         PROMETHEUS_PUSH_GATEWAY = 'http://prometheus.host.internal'
-        
 
+        PYTHON_PACKAGE_VERSION = 'N/A' 
     }
 
     stages {
@@ -115,7 +115,7 @@ pipeline {
                                     --report report.html \
                                     --log log.html \
                                     --xunit xunit.xml \
-                                    . || echo "Tests Robot Framework terminés avec échecs"
+                                    . || echo "Robot Framework tests finished with failures"
                                 set -e
                             """
                         }
@@ -125,16 +125,16 @@ pipeline {
                             script {
                                 def outputFile = "${ROBOT_REPORTS_DIR}/output.xml"
                                 if (fileExists(outputFile)) {
-                                    echo "Publication finale du rapport Robot Framework: ${outputFile}"
+                                    echo "Publishing final Robot Framework report: ${outputFile}"
                                     robot outputPath: "${ROBOT_REPORTS_DIR}",
                                           outputFileName: "output.xml",
                                           reportFileName: "report.html",
                                           logFileName: "log.html",
-                                          disableArchiveOutput: true, // empêche l’archivage workspace
+                                          disableArchiveOutput: true,
                                           passThreshold: 70.0,
                                           unstableThreshold: 50.0
                                 } else {
-                                    echo "Aucun fichier de rapport Robot trouvé"
+                                    echo "No Robot report file found"
                                 }
                             }
                         }
@@ -243,39 +243,36 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     echo "Cleanup completed"
                 """
 
-                // Déterminer la couleur selon le statut
                 def statusColor
                 if (BUILD_STATUS == 'SUCCESS') {
-                    statusColor = '#28a745' // Vert
+                    statusColor = '#28a745'
                 } else if (BUILD_STATUS == 'UNSTABLE') {
-                    statusColor = '#ffc107' // Jaune
+                    statusColor = '#ffc107' 
                 } else {
-                    statusColor = '#dc3545' // Rouge
+                    statusColor = '#dc3545'
                 }
-                
-                // Charger le template HTML
+
+    
                 def emailTemplate = readFile(file: env.EMAIL_TEMPLATE_PATH)
-                
-                // Remplacer les variables dans le template
+
                 def emailBody = emailTemplate
                     .replace('${STATUS_COLOR}', statusColor)
-                    .replace('${BUILD_STATUS}', BUILD_STATUS)
-                    .replace('${JOB_NAME}', env.JOB_NAME)
-                    .replace('${BUILD_NUMBER}', env.BUILD_NUMBER)
-                    .replace('${BUILD_DURATION}', currentBuild.durationString)
-                    .replace('${NEXUS_URL}', env.NEXUS_URL)
-                    .replace('${NEXUS_REPOSITORY}', env.NEXUS_REPOSITORY)
-                    .replace('${PYTHON_PACKAGE_VERSION}', env.PYTHON_PACKAGE_VERSION)
-                    .replace('${BUILD_URL}', env.BUILD_URL)
+                    .replace('${BUILD_STATUS}', BUILD_STATUS ?: 'UNKNOWN')
+                    .replace('${JOB_NAME}', env.JOB_NAME ?: 'UNKNOWN')
+                    .replace('${BUILD_NUMBER}', env.BUILD_NUMBER ?: '0')
+                    .replace('${BUILD_DURATION}', currentBuild.durationString ?: '0s')
+                    .replace('${NEXUS_URL}', env.NEXUS_URL ?: 'N/A')
+                    .replace('${NEXUS_REPOSITORY}', env.NEXUS_REPOSITORY ?: 'N/A')
+                    .replace('${PYTHON_PACKAGE_VERSION}', env.PYTHON_PACKAGE_VERSION ?: 'N/A')
+                    .replace('${BUILD_URL}', env.BUILD_URL ?: 'N/A')
                     .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
-                
+
                 emailext (
                     subject: "Build ${BUILD_STATUS}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
                     body: emailBody,
                     to: env.EMAIL_RECIPIENTS,
                     mimeType: 'text/html'
                 )
-
             }
             cleanWs()
         }
