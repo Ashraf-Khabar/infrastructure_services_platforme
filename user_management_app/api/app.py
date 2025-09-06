@@ -1,22 +1,23 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
 import hashlib
 import logging
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-from fastapi import FastAPI, Response
+import time
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
 # Configurer le logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Prometheus metrics
 REQUEST_COUNT = Counter('http_requests_total', 'Total HTTP Requests', ['method', 'endpoint', 'status'])
 REQUEST_DURATION = Histogram('http_request_duration_seconds', 'HTTP request duration', ['method', 'endpoint'])
 ACTIVE_USERS = Gauge('user_management_active_users', 'Number of active users')
 
 app = FastAPI(
-    title="User Management API", 
+    title="User Management API",
     version="1.0.0",
     description="API for managing users with authentication"
 )
@@ -30,6 +31,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Modèles Pydantic
 class UserCreate(BaseModel):
     username: str
     email: str
@@ -57,7 +59,7 @@ users_db = [
         "id": 1,
         "username": "admin",
         "email": "admin@example.com",
-        "password_hash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",  # admin
+        "password_hash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",  # "admin"
         "first_name": "Admin",
         "last_name": "User",
         "role": "admin",
@@ -65,32 +67,38 @@ users_db = [
     }
 ]
 
+# Mettre à jour la métrique ACTIVE_USERS
+def update_active_users_gauge():
+    ACTIVE_USERS.set(len([u for u in users_db if u["is_active"]]))
+
+# Fonctions utilitaires pour le mot de passe
 def get_password_hash(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def verify_password(plain_password, hashed_password):
     return get_password_hash(plain_password) == hashed_password
 
-
+# Middleware pour métriques
 @app.middleware("http")
 async def monitor_requests(request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
-    
+
     REQUEST_COUNT.labels(
         method=request.method,
         endpoint=request.url.path,
         status=response.status_code
     ).inc()
-    
+
     REQUEST_DURATION.labels(
         method=request.method,
         endpoint=request.url.path
     ).observe(process_time)
-    
+
     return response
 
+# Endpoints Prometheus
 @app.get('/metrics')
 async def metrics():
     return Response(
@@ -98,6 +106,7 @@ async def metrics():
         media_type=CONTENT_TYPE_LATEST
     )
 
+# Root et health check
 @app.get("/")
 def read_root():
     logger.info("Root endpoint called")
@@ -107,6 +116,7 @@ def read_root():
 def health_check():
     return {"status": "healthy", "users_count": len(users_db)}
 
+# Authentification
 @app.post("/auth/login")
 def login(login_data: LoginRequest):
     logger.info(f"Login attempt for user: {login_data.username}")
@@ -121,7 +131,6 @@ def login(login_data: LoginRequest):
         logger.warning(f"Invalid password for user: {login_data.username}")
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    # Retourner les infos utilisateur sans le mot de passe
     user_response = {
         "id": user["id"],
         "username": user["username"],
@@ -135,28 +144,28 @@ def login(login_data: LoginRequest):
     logger.info(f"Login successful for user: {login_data.username}")
     return user_response
 
+# Gestion des utilisateurs
 @app.get("/users/", response_model=List[UserResponse])
 def get_users():
     logger.info("Get users endpoint called")
-    # Retourner les utilisateurs sans le mot de passe hash
-    users_response = []
-    for user in users_db:
-        users_response.append({
-            "id": user["id"],
-            "username": user["username"],
-            "email": user["email"],
-            "first_name": user["first_name"],
-            "last_name": user["last_name"],
-            "role": user["role"],
-            "is_active": user["is_active"]
-        })
+    users_response = [
+        {
+            "id": u["id"],
+            "username": u["username"],
+            "email": u["email"],
+            "first_name": u["first_name"],
+            "last_name": u["last_name"],
+            "role": u["role"],
+            "is_active": u["is_active"]
+        }
+        for u in users_db
+    ]
     return users_response
 
 @app.post("/users/", response_model=UserResponse)
 def create_user(user: UserCreate):
     logger.info(f"Create user attempt: {user.username}")
     
-    # Vérifier si l'utilisateur existe déjà
     existing_user = next((u for u in users_db if u["username"] == user.username or u["email"] == user.email), None)
     if existing_user:
         logger.warning(f"User already exists: {user.username}")
@@ -176,6 +185,7 @@ def create_user(user: UserCreate):
     }
     
     users_db.append(new_user)
+    update_active_users_gauge()
     
     user_response = {
         "id": new_user["id"],
@@ -201,10 +211,12 @@ def delete_user(user_id: int):
         raise HTTPException(status_code=404, detail="User not found")
     
     deleted_user = users_db.pop(user_index)
+    update_active_users_gauge()
     logger.info(f"User deleted: {deleted_user['username']}")
     
     return {"message": "User deleted successfully"}
 
+# Lancer le serveur
 if __name__ == "__main__":
     import uvicorn
     logger.info("Starting API server on 0.0.0.0:5000")
