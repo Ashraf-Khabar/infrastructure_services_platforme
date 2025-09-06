@@ -9,12 +9,12 @@ pipeline {
         API_PID_FILE = "/tmp/api.pid"
         EMAIL_RECIPIENTS = 'khabarachraf@gmail.com'
         BUILD_STATUS = "UNKNOWN"
-        
+
         NEXUS_URL = 'http://nexus.host.internal'
         NEXUS_REPOSITORY = 'user_management_app'
         NEXUS_CREDENTIALS_ID = 'JENKINS_TOKEN'
         PYTHON_PACKAGE_VERSION = '1.0.0'
-        
+
         EMAIL_TEMPLATE_PATH = "${WORKSPACE}/internal_apps_monitoring/mail/email-template.html"
         ROBOT_REPORTS_DIR = "${WORKSPACE}/robot_reports"
         PROMETHEUS_PUSH_GATEWAY = 'http://prometheus.host.internal'
@@ -35,19 +35,13 @@ pipeline {
         stage('Install Dependencies') {
             parallel {
                 stage('API Dependencies') {
-                    steps {
-                        sh "${VENV_PATH}/bin/pip install -r ${APP_DIR}/api/requirements.txt"
-                    }
+                    steps { sh "${VENV_PATH}/bin/pip install -r ${APP_DIR}/api/requirements.txt" }
                 }
                 stage('Client Dependencies') {
-                    steps {
-                        sh "${VENV_PATH}/bin/pip install -r ${APP_DIR}/client/requirements.txt"
-                    }
+                    steps { sh "${VENV_PATH}/bin/pip install -r ${APP_DIR}/client/requirements.txt" }
                 }
                 stage('Test Dependencies') {
-                    steps {
-                        sh "${VENV_PATH}/bin/pip install pytest requests"
-                    }
+                    steps { sh "${VENV_PATH}/bin/pip install pytest requests" }
                 }
                 stage('Robot Framework Dependencies') {
                     steps {
@@ -60,9 +54,7 @@ pipeline {
                     }
                 }
                 stage('Prometheus Dependencies') {
-                    steps {
-                        sh "${VENV_PATH}/bin/pip install prometheus-client"
-                    }
+                    steps { sh "${VENV_PATH}/bin/pip install prometheus-client" }
                 }
             }
         }
@@ -75,25 +67,21 @@ pipeline {
                         cd ${APP_DIR}/api
                         nohup ${VENV_PATH}/bin/python app.py > api.log 2>&1 &
                         echo \$! > ${API_PID_FILE}
-                        sleep 3  # Donner du temps à l'API de démarrer
+                        sleep 3
                     """
-                    
-                    // Solution robuste pour vérifier que l'API est prête
+
                     timeout(time: 60, unit: 'SECONDS') {
                         waitUntil {
                             try {
-                                // Essayer plusieurs endpoints pour vérifier que l'API est complètement prête
                                 sh """
-                                    # Essayer d'abord le endpoint health
                                     curl -s -f http://localhost:5000/health > /dev/null && \
-                                    # Essayer aussi le endpoint root pour être sûr
                                     curl -s -f http://localhost:5000/ > /dev/null
                                 """
                                 echo "API is ready and responding!"
                                 return true
                             } catch (Exception e) {
                                 echo "API not ready yet, waiting..."
-                                sleep(5)
+                                sleep 5
                                 return false
                             }
                         }
@@ -105,34 +93,21 @@ pipeline {
         stage('Execute Tests') {
             parallel {
                 stage('API Tests') {
-                    steps {
-                        sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_api.py -v --tb=short"
-                    }
+                    steps { sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_api.py -v --tb=short" }
                 }
-
                 stage('Model Tests') {
-                    steps {
-                        sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_models.py -v --tb=short"
-                    }
+                    steps { sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_models.py -v --tb=short" }
                 }
-
                 stage('Unit Tests') {
-                    steps {
-                        sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_unit.py -v --tb=short"
-                    }
+                    steps { sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_unit.py -v --tb=short" }
                 }
-
                 stage('Robot Framework Tests') {
                     steps {
                         script {
                             sh """
                                 mkdir -p ${ROBOT_REPORTS_DIR}
                                 echo "=== Recherche des tests Robot Framework ==="
-                                
-                                # Se placer dans le dossier des tests
                                 cd ${APP_DIR}/robot_tests
-                                
-                                # Exécuter les tests sans faire échouer le build
                                 set +e
                                 ${VENV_PATH}/bin/robot \
                                     --outputdir ${ROBOT_REPORTS_DIR} \
@@ -140,27 +115,24 @@ pipeline {
                                     --report report.html \
                                     --log log.html \
                                     --xunit xunit.xml \
-                                    . || echo "Tests Robot Framework terminés avec des échecs (build continue)"
+                                    . || echo "Tests Robot Framework terminés avec des échecs"
                                 set -e
-                                
                                 echo "=== Fichiers générés ==="
                                 ls -la ${ROBOT_REPORTS_DIR}/
                             """
                         }
                     }
-                    
                     post {
                         always {
                             script {
-                                // Déterminer quel fichier de rapport utiliser
                                 def outputFile = "output.xml"
                                 if (!fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
                                     outputFile = "xunit.xml"
                                 }
-                                
+
                                 if (fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
                                     echo "Utilisation du fichier de rapport: ${outputFile}"
-                                    robot outputPath: "${ROBOT_REPORTS_DIR}", 
+                                    robot outputPath: "${ROBOT_REPORTS_DIR}",
                                           outputFileName: outputFile,
                                           reportFileName: "report.html",
                                           logFileName: "log.html",
@@ -181,22 +153,19 @@ pipeline {
             steps {
                 script {
                     echo "Pushing metrics to Prometheus..."
-                    
-                    // Calculer les métriques de tests
                     def totalTests = 0
                     def passedTests = 0
                     def failedTests = 0
                     def skippedTests = 0
-                    
+
                     try {
-                        // Compter les tests Robot Framework
                         if (fileExists("${ROBOT_REPORTS_DIR}/output.xml")) {
                             def robotOutput = readFile("${ROBOT_REPORTS_DIR}/output.xml")
                             def testsMatcher = robotOutput =~ 'tests="([0-9]+)"'
                             def passedMatcher = robotOutput =~ 'passed="([0-9]+)"'
                             def failedMatcher = robotOutput =~ 'failed="([0-9]+)"'
                             def skippedMatcher = robotOutput =~ 'skipped="([0-9]+)"'
-                            
+
                             if (testsMatcher.find()) totalTests += testsMatcher[0][1].toInteger()
                             if (passedMatcher.find()) passedTests += passedMatcher[0][1].toInteger()
                             if (failedMatcher.find()) failedTests += failedMatcher[0][1].toInteger()
@@ -205,8 +174,7 @@ pipeline {
                     } catch (Exception e) {
                         echo "Erreur lors de la lecture des métriques Robot: ${e.getMessage()}"
                     }
-                    
-                    // Préparer les métriques au format Prometheus
+
                     def metrics = """
 # HELP jenkins_custom_tests_total Total number of tests
 # TYPE jenkins_custom_tests_total counter
@@ -227,11 +195,10 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
 # TYPE jenkins_custom_stage_duration_seconds gauge
 jenkins_custom_stage_duration_seconds{job="${env.JOB_NAME}", stage="tests"} ${currentBuild.duration / 1000}
 """
-                    
-                    // Pousser les métriques vers Prometheus
+
                     try {
                         sh """
-                            echo '${metrics}' | curl --connect-timeout 5 --max-time 10 -X POST --data-binary @- ${PROMETHEUS_PUSH_GATEWAY}/metrics/job/jenkins/instance/${env.JOB_NAME} || echo "Prometheus push failed, continuing..."
+                            echo '${metrics}' | curl --connect-timeout 5 --max-time 10 -X POST --data-binary @- ${PROMETHEUS_PUSH_GATEWAY}/metrics/job/jenkins/instance/${env.JOB_NAME} || echo "Prometheus push failed"
                         """
                         echo "Metrics pushed to Prometheus successfully"
                     } catch (Exception e) {
@@ -267,7 +234,6 @@ jenkins_custom_stage_duration_seconds{job="${env.JOB_NAME}", stage="tests"} ${cu
             steps {
                 script {
                     echo "Building Python package :"
-
                     sh '${VENV_PATH}/bin/pip install setuptools wheel'
                     sh """
                         cd ${APP_DIR}
@@ -282,7 +248,6 @@ jenkins_custom_stage_duration_seconds{job="${env.JOB_NAME}", stage="tests"} ${cu
             steps {
                 script {
                     echo "Deploying to Nexus Sonatype : "
-                    
                     withCredentials([usernamePassword(
                         credentialsId: env.NEXUS_CREDENTIALS_ID,
                         usernameVariable: 'NEXUS_USER',
@@ -291,11 +256,10 @@ jenkins_custom_stage_duration_seconds{job="${env.JOB_NAME}", stage="tests"} ${cu
                         sh """
                             cd ${APP_DIR}
                             ${VENV_PATH}/bin/pip install twine
-                            
                             ${VENV_PATH}/bin/twine upload \
                                 --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
                                 -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
-                                dist/* || echo "Nexus upload failed, continuing..."
+                                dist/* || echo "Nexus upload failed"
                         """
                     }
                 }
@@ -306,13 +270,8 @@ jenkins_custom_stage_duration_seconds{job="${env.JOB_NAME}", stage="tests"} ${cu
             steps {
                 script {
                     echo "Archiving test reports..."
-                    // Archiver les rapports Robot Framework
                     archiveArtifacts artifacts: 'robot_reports/*.html, robot_reports/*.xml', fingerprint: false
-                    
-                    // Archiver les logs de l'API (chemin corrigé)
                     archiveArtifacts artifacts: 'user_management_app/api/api.log', fingerprint: false
-                    
-                    // Archiver aussi les packages générés
                     archiveArtifacts artifacts: 'user_management_app/dist/*', fingerprint: false
                 }
             }
@@ -323,8 +282,6 @@ jenkins_custom_stage_duration_seconds{job="${env.JOB_NAME}", stage="tests"} ${cu
         always {
             script {
                 BUILD_STATUS = currentBuild.currentResult
-                
-                // Nettoyage robuste
                 sh """
                     echo "Cleaning up processes..."
                     if [ -f ${API_PID_FILE} ]; then
@@ -332,38 +289,32 @@ jenkins_custom_stage_duration_seconds{job="${env.JOB_NAME}", stage="tests"} ${cu
                         kill \$PID 2>/dev/null || true
                         rm -f ${API_PID_FILE}
                     fi
-                    # Nettoyage des processus Python de l'application
                     pkill -f "python.*app\\.py" 2>/dev/null || true
                     pkill -f "uvicorn" 2>/dev/null || true
                     echo "Cleanup completed"
                 """
 
-                // Vérification et publication des résultats Robot Framework
-                script {
-                    def robotFiles = [
-                        "${ROBOT_REPORTS_DIR}/output.xml",
-                        "${ROBOT_REPORTS_DIR}/xunit.xml"
-                    ]
-                    
-                    def robotReportFound = false
-                    for (file in robotFiles) {
-                        if (fileExists(file)) {
-                            echo "Publication finale du rapport Robot Framework: ${file}"
-                            robot outputPath: "${ROBOT_REPORTS_DIR}", 
-                                  outputFileName: new File(file).getName(),
-                                  reportFileName: "report.html",
-                                  logFileName: "log.html",
-                                  disableArchiveOutput: false,
-                                  passThreshold: 70.0,
-                                  unstableThreshold: 50.0
-                            robotReportFound = true
-                            break
-                        }
+                def robotFiles = [
+                    "${ROBOT_REPORTS_DIR}/output.xml",
+                    "${ROBOT_REPORTS_DIR}/xunit.xml"
+                ]
+
+                for (file in robotFiles) {
+                    if (fileExists(file)) {
+                        echo "Publication finale du rapport Robot Framework: ${file}"
+                        // Extract filename safely without using File()
+                        def filename = file.tokenize('/').last()
+                        robot outputPath: "${ROBOT_REPORTS_DIR}",
+                              outputFileName: filename,
+                              reportFileName: "report.html",
+                              logFileName: "log.html",
+                              disableArchiveOutput: false,
+                              passThreshold: 70.0,
+                              unstableThreshold: 50.0
+                        break
                     }
                 }
 
-                // La partie email est gérée par un autre fichier/externe
-                // Elle sera exécutée automatiquement selon la configuration existante
             }
             cleanWs()
         }
