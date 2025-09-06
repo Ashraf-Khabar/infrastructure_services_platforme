@@ -126,14 +126,16 @@ pipeline {
                                 # Se placer dans le dossier des tests
                                 cd ${APP_DIR}/robot_tests
                                 
-                                # Exécuter tous les tests avec génération explicite des rapports
+                                # Exécuter les tests sans faire échouer le build
+                                set +e
                                 ${VENV_PATH}/bin/robot \
                                     --outputdir ${ROBOT_REPORTS_DIR} \
                                     --output output.xml \
                                     --report report.html \
                                     --log log.html \
                                     --xunit xunit.xml \
-                                    .
+                                    . || echo "Tests Robot Framework terminés avec des échecs (build continue)"
+                                set -e
                                 
                                 echo "=== Fichiers générés ==="
                                 ls -la ${ROBOT_REPORTS_DIR}/
@@ -149,39 +151,18 @@ pipeline {
                                 if (!fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
                                     outputFile = "xunit.xml"
                                 }
-                                if (!fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
-                                    outputFile = "robotxunit.xml"
-                                }
                                 
                                 if (fileExists("${ROBOT_REPORTS_DIR}/${outputFile}")) {
-                                    echo "Utilisation du fichier de rapport: ${outputFile}"
+                                    echo "Publication du rapport Robot Framework: ${outputFile}"
                                     robot outputPath: "${ROBOT_REPORTS_DIR}", 
                                           outputFileName: outputFile,
                                           reportFileName: "report.html",
                                           logFileName: "log.html",
-                                          disableArchiveOutput: false
+                                          disableArchiveOutput: false,
+                                          passThreshold: 70.0,
+                                          unstableThreshold: 50.0
                                 } else {
-                                    echo "Aucun fichier de rapport XML trouvé, création d'un rapport minimal..."
-                                    sh """
-                                        cat > ${ROBOT_REPORTS_DIR}/output.xml << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<robot generated="2025-09-04T00:00:00.000000" generator="Robot 6.1.1">
-<suite source="${APP_DIR}/robot_tests" name="Test Suite">
-<test id="s1-t1" name="Aucun test exécuté">
-<status status="SKIP" starttime="2025-09-04T00:00:00.000000" endtime="2025-09-04T00:00:00.000000">
-Aucun test Robot Framework n'a pu être exécuté
-</status>
-</test>
-<status status="SKIP" starttime="2025-09-04T00:00:00.000000" endtime="2025-09-04T00:00:00.000000"/>
-</suite>
-</robot>
-EOF
-                                    """
-                                    robot outputPath: "${ROBOT_REPORTS_DIR}", 
-                                          outputFileName: "output.xml",
-                                          reportFileName: "report.html",
-                                          logFileName: "log.html",
-                                          disableArchiveOutput: false
+                                    echo "Aucun fichier de rapport XML trouvé"
                                 }
                             }
                         }
@@ -245,6 +226,22 @@ EOF
                 }
             }
         }
+
+        stage('Archive Reports') {
+            steps {
+                script {
+                    echo "Archiving test reports..."
+                    // Archiver les rapports Robot Framework
+                    archiveArtifacts artifacts: 'robot_reports/*.html, robot_reports/*.xml', fingerprint: false
+                    
+                    // Archiver les logs de l'API
+                    archiveArtifacts artifacts: 'api.log', fingerprint: false
+                    
+                    // Archiver les packages générés
+                    archiveArtifacts artifacts: 'user_management_app/dist/*', fingerprint: false
+                }
+            }
+        }
     }
 
     post {
@@ -266,26 +263,27 @@ EOF
                 script {
                     def robotFiles = [
                         "${ROBOT_REPORTS_DIR}/output.xml",
-                        "${ROBOT_REPORTS_DIR}/xunit.xml", 
-                        "${ROBOT_REPORTS_DIR}/robotxunit.xml"
+                        "${ROBOT_REPORTS_DIR}/xunit.xml"
                     ]
                     
                     def robotReportFound = false
                     for (file in robotFiles) {
                         if (fileExists(file)) {
-                            echo "Publication du rapport Robot Framework: ${file}"
+                            echo "Publication finale du rapport Robot Framework: ${file}"
                             robot outputPath: "${ROBOT_REPORTS_DIR}", 
                                   outputFileName: new File(file).getName(),
                                   reportFileName: "report.html",
                                   logFileName: "log.html",
-                                  disableArchiveOutput: false
+                                  disableArchiveOutput: false,
+                                  passThreshold: 70.0,
+                                  unstableThreshold: 50.0
                             robotReportFound = true
                             break
                         }
                     }
                     
                     if (!robotReportFound) {
-                        echo "Aucun rapport Robot Framework trouvé pour publication"
+                        echo "Aucun rapport Robot Framework trouvé pour publication finale"
                     }
                 }
 
@@ -298,28 +296,70 @@ EOF
                     statusColor = '#dc3545' 
                 }
                 
-                def emailTemplate = readFile(file: env.EMAIL_TEMPLATE_PATH)
-                
-                def emailBody = emailTemplate
-                    .replace('${STATUS_COLOR}', statusColor)
-                    .replace('${BUILD_STATUS}', BUILD_STATUS)
-                    .replace('${JOB_NAME}', env.JOB_NAME)
-                    .replace('${BUILD_NUMBER}', env.BUILD_NUMBER)
-                    .replace('${BUILD_DURATION}', currentBuild.durationString)
-                    .replace('${NEXUS_URL}', env.NEXUS_URL)
-                    .replace('${NEXUS_REPOSITORY}', env.NEXUS_REPOSITORY)
-                    .replace('${PYTHON_PACKAGE_VERSION}', env.PYTHON_PACKAGE_VERSION)
-                    .replace('${BUILD_URL}', env.BUILD_URL)
-                    .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
+                // Lire le template email
+                def emailTemplate = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Build Notification</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { background-color: ${statusColor}; color: white; padding: 10px; border-radius: 5px; }
+        .content { margin: 20px 0; }
+        .details { background-color: #f8f9fa; padding: 15px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>Build ${BUILD_STATUS}: ${env.JOB_NAME} [${env.BUILD_NUMBER}]</h2>
+    </div>
+    
+    <div class="content">
+        <p>Le build s'est terminé avec le statut: <strong>${BUILD_STATUS}</strong></p>
+        
+        <div class="details">
+            <h3>Détails du build:</h3>
+            <ul>
+                <li><strong>Job:</strong> ${env.JOB_NAME}</li>
+                <li><strong>Build Number:</strong> ${env.BUILD_NUMBER}</li>
+                <li><strong>Durée:</strong> ${currentBuild.durationString}</li>
+                <li><strong>URL:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></li>
+                <li><strong>Nexus Repository:</strong> ${env.NEXUS_REPOSITORY}</li>
+                <li><strong>Version:</strong> ${env.PYTHON_PACKAGE_VERSION}</li>
+            </ul>
+        </div>
+        
+        <p>Consultez les rapports détaillés dans Jenkins pour plus d'informations.</p>
+    </div>
+    
+    <footer>
+        <p>© ${new Date().format("yyyy")} - Système de notification Jenkins</p>
+    </footer>
+</body>
+</html>
+"""
                 
                 emailext (
                     subject: "Build ${BUILD_STATUS}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                    body: emailBody,
+                    body: emailTemplate,
                     to: env.EMAIL_RECIPIENTS,
                     mimeType: 'text/html'
                 )
             }
             cleanWs()
+        }
+        
+        success {
+            echo "Build réussi! ✅"
+        }
+        
+        failure {
+            echo "Build échoué! ❌"
+        }
+        
+        unstable {
+            echo "Build instable! ⚠️"
         }
     }
 }

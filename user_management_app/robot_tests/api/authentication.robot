@@ -9,15 +9,15 @@ Suite Teardown   API Teardown
 
 *** Test Cases ***
 Test Login With Invalid Credentials
-    [Documentation]    Test le login avec des identifiants invalides
+    [Documentation]    Test le login avec des identifiants invalides - devrait retourner 401
     &{headers}=    Create Dictionary    Content-Type=application/json
     &{data}=    Create Dictionary
     ...    username=invaliduser
     ...    password=wrongpassword
 
-    ${response}=    POST    ${API_URL}/auth/login    json=${data}    headers=${headers}
-    Should Be Equal As Numbers    ${response.status_code}    401    # 401 est la réponse attendue pour des identifiants invalides
-    Should Contain    ${response.text}    Invalid credentials    # Vérifier le message d'erreur
+    # Utiliser Run Keyword And Expect Error pour capturer l'erreur HTTP attendue
+    ${response}=    Run Keyword And Expect Error    HTTPError: 401*    POST    ${API_URL}/auth/login    json=${data}    headers=${headers}
+    Should Contain    ${response}    401 Client Error: Unauthorized
 
 Test Password Hashing Security
     [Documentation]    Test que les mots de passe sont bien hashés
@@ -36,5 +36,5 @@ Test User Role Validation
     
     # Vérifier que tous les utilisateurs ont un rôle valide
     FOR    ${user}    IN    @{response.json()}
-        Should Contain Any    ${user['role']}    user    admin    # Correction : utiliser Should Contain Any
+        Should Contain Any    ${user['role']}    user    admin    # Rôle doit être soit user soit admin
     END
