@@ -16,7 +16,8 @@ Test Login With Invalid Credentials
     ...    password=wrongpassword
 
     ${response}=    POST    ${API_URL}/auth/login    json=${data}    headers=${headers}
-    Should Be Equal As Numbers    ${response.status_code}    401
+    Should Be Equal As Numbers    ${response.status_code}    401    # 401 est la réponse attendue pour des identifiants invalides
+    Should Contain    ${response.text}    Invalid credentials    # Vérifier le message d'erreur
 
 Test Password Hashing Security
     [Documentation]    Test que les mots de passe sont bien hashés
@@ -35,5 +36,5 @@ Test User Role Validation
     
     # Vérifier que tous les utilisateurs ont un rôle valide
     FOR    ${user}    IN    @{response.json()}
-        Should Contain    ${user['role']}    user    admin    # Rôle doit être soit user soit admin
+        Should Contain Any    ${user['role']}    user    admin    # Correction : utiliser Should Contain Any
     END

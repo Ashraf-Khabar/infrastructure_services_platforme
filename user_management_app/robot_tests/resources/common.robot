@@ -17,12 +17,12 @@ API Teardown
 Generate Random Email
     [Arguments]    ${length}=8
     ${random_string}=    Generate Random String    ${length}    [LOWER]
-    [Return]    ${random_string}@example.com
+    RETURN    ${random_string}@example.com    # Utiliser RETURN au lieu de [Return]
 
 Generate Random Username
     [Arguments]    ${length}=6
     ${random_string}=    Generate Random String    ${length}    [LOWER]
-    [Return]    ${random_string}
+    RETURN    ${random_string}    # Utiliser RETURN au lieu de [Return]
 
 Validate Response Status
     [Arguments]    ${response}    ${expected_status}=200
