@@ -6,9 +6,9 @@ pipeline {
     environment {
         VENV_PATH = "${WORKSPACE}/venv"
         APP_DIR = "${WORKSPACE}/user_management_app"
-        API_PID_FILE = "/tmp/api.pid"
+        API_PID_FILE = '/tmp/api.pid'
         EMAIL_RECIPIENTS = 'khabarachraf@gmail.com'
-        BUILD_STATUS = "UNKNOWN"
+        BUILD_STATUS = 'UNKNOWN'
         EMAIL_TEMPLATE_PATH = "${WORKSPACE}/internal_apps_monitoring/mail/email-template.html"
 
         NEXUS_URL = 'http://nexus.host.internal'
@@ -19,7 +19,7 @@ pipeline {
         PROMETHEUS_PUSH_GATEWAY = 'http://prometheus.host.internal'
 
         PYTHON_PACKAGE_VERSION = 'N/A'
-        
+
         // Variables AWS
         AWS_REGION = 'us-east-1'
         AWS_ECR_REGISTRY = 'your-account-id.dkr.ecr.us-east-1.amazonaws.com'
@@ -34,19 +34,38 @@ pipeline {
         stage('Setup Python Environment') {
             steps {
                 sh '''
-                    sudo apt update -y
-                    sudo apt install -y python3 python3-pip python3-venv curl unzip docker.io
-                    python3 -m venv ${VENV_PATH}
-                    ${VENV_PATH}/bin/pip install --upgrade pip
-                    
-                    # Install AWS CLI
+                # Update and install basic dependencies
+                sudo apt update -y
+                sudo apt install -y python3 python3-pip python3-venv curl unzip docker.io
+
+                # Create Python virtual environment
+                python3 -m venv ${VENV_PATH}
+                ${VENV_PATH}/bin/pip install --upgrade pip
+
+                # Install or update AWS CLI
+                if ! command -v aws &> /dev/null; then
+                    echo "Installing AWS CLI..."
                     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
                     unzip awscliv2.zip
                     sudo ./aws/install
                     rm -rf awscliv2.zip aws/
-                '''
+                else
+                    echo "AWS CLI is already installed"
+                    # Optional: update if needed
+                    # curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                    # unzip awscliv2.zip
+                    # sudo ./aws/install --update
+                    # rm -rf awscliv2.zip aws/
+                fi
+
+                # Verify installations
+                echo "Python version: $(python3 --version)"
+                echo "Pip version: $(${VENV_PATH}/bin/pip --version)"
+                echo "AWS CLI version: $(aws --version 2>&1)"
+                echo "Docker version: $(docker --version)"
+            '''
+                }
             }
-        }
 
         stage('Install Dependencies') {
             parallel {
@@ -86,7 +105,7 @@ pipeline {
         stage('Start API Server') {
             steps {
                 script {
-                    echo "Starting API server"
+                    echo 'Starting API server'
                     sh """
                         cd ${APP_DIR}/api
                         nohup ${VENV_PATH}/bin/python app.py > /dev/null 2>&1 &
@@ -97,14 +116,14 @@ pipeline {
                     timeout(time: 60, unit: 'SECONDS') {
                         waitUntil {
                             try {
-                                sh """
+                                sh '''
                                     curl -s -f http://localhost:5000/health > /dev/null && \
                                     curl -s -f http://localhost:5000/ > /dev/null
-                                """
-                                echo "API is ready and responding!"
+                                '''
+                                echo 'API is ready and responding!'
                                 return true
                             } catch (Exception e) {
-                                echo "API not ready yet, waiting..."
+                                echo 'API not ready yet, waiting...'
                                 sleep 5
                                 return false
                             }
@@ -150,14 +169,14 @@ pipeline {
                                 if (fileExists(outputFile)) {
                                     echo "Publishing final Robot Framework report: ${outputFile}"
                                     robot outputPath: "${ROBOT_REPORTS_DIR}",
-                                          outputFileName: "output.xml",
-                                          reportFileName: "report.html",
-                                          logFileName: "log.html",
+                                          outputFileName: 'output.xml',
+                                          reportFileName: 'report.html',
+                                          logFileName: 'log.html',
                                           disableArchiveOutput: true,
                                           passThreshold: 70.0,
                                           unstableThreshold: 50.0
                                 } else {
-                                    echo "No Robot report file found"
+                                    echo 'No Robot report file found'
                                 }
                             }
                         }
@@ -169,7 +188,7 @@ pipeline {
         stage('Push Metrics to Prometheus') {
             steps {
                 script {
-                    echo "Pushing metrics to Prometheus"
+                    echo 'Pushing metrics to Prometheus'
                     def metrics = """
 # HELP jenkins_custom_build_info Build information
 # TYPE jenkins_custom_build_info gauge
@@ -183,7 +202,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         sh """
                             echo '${metrics}' | curl --connect-timeout 5 --max-time 10 -X POST --data-binary @- ${PROMETHEUS_PUSH_GATEWAY}/metrics/job/jenkins/instance/${env.JOB_NAME} || echo "Prometheus push failed"
                         """
-                        echo "Metrics pushed to Prometheus successfully"
+                        echo 'Metrics pushed to Prometheus successfully'
                     } catch (Exception e) {
                         echo "Failed to push metrics to Prometheus: ${e.getMessage()}"
                     }
@@ -194,7 +213,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Stop API Server') {
             steps {
                 script {
-                    echo "Stopping API server"
+                    echo 'Stopping API server'
                     sh """
                         if [ -f ${API_PID_FILE} ]; then
                             PID=\$(cat ${API_PID_FILE})
@@ -216,14 +235,14 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Build Python Package') {
             steps {
                 script {
-                    echo "Building Python package"
+                    echo 'Building Python package'
                     sh '${VENV_PATH}/bin/pip install setuptools wheel'
                     sh """
                         cd ${APP_DIR}
                         ${VENV_PATH}/bin/python setup.py sdist bdist_wheel
                     """
                     sh "ls -la ${APP_DIR}/dist/"
-                    
+
                     // Get package version
                     def packageVersion = sh(
                         script: "${VENV_PATH}/bin/python -c \"import setuptools; setup = setuptools.setup(); print(setup.get('version', 'N/A'))\" 2>/dev/null || echo 'N/A'",
@@ -237,7 +256,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Deploy to Nexus') {
             steps {
                 script {
-                    echo "Deploying to Nexus Sonatype"
+                    echo 'Deploying to Nexus Sonatype'
                     withCredentials([usernamePassword(
                         credentialsId: env.NEXUS_CREDENTIALS_ID,
                         usernameVariable: 'NEXUS_USER',
@@ -259,22 +278,22 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Build Docker Images') {
             steps {
                 script {
-                    echo "Building Docker images for AWS ECR"
-                    
+                    echo 'Building Docker images for AWS ECR'
+
                     // Build API image
                     sh """
                         cd ${APP_DIR}/api
                         docker build -t ${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} .
                         docker tag ${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
                     """
-                    
+
                     // Build Client image
                     sh """
                         cd ${APP_DIR}/client
                         docker build -t ${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} .
                         docker tag ${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
                     """
-                    
+
                     sh "docker images | grep ${ECR_API_REPOSITORY}"
                     sh "docker images | grep ${ECR_CLIENT_REPOSITORY}"
                 }
@@ -284,8 +303,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Push to AWS ECR') {
             steps {
                 script {
-                    echo "Pushing Docker images to AWS ECR"
-                    
+                    echo 'Pushing Docker images to AWS ECR'
+
                     // Utilisation de UsernamePasswordMultiBinding au lieu de AmazonWebServicesCredentialsBinding
                     withCredentials([[
                         $class: 'UsernamePasswordMultiBinding',
@@ -298,16 +317,16 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
                             aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
                             aws configure set region ${AWS_REGION}
-                            
+
                             # Login to ECR
                             aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ECR_REGISTRY}
-                            
+
                             # Push API image
                             docker push ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
-                            
+
                             # Push Client image
                             docker push ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
-                            
+
                             echo "Images successfully pushed to ECR"
                         """
                     }
@@ -318,8 +337,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Deploy to AWS ECS') {
             steps {
                 script {
-                    echo "Deploying to AWS ECS"
-                    
+                    echo 'Deploying to AWS ECS'
+
                     withCredentials([[
                         $class: 'UsernamePasswordMultiBinding',
                         credentialsId: env.AWS_CREDENTIALS_ID,
@@ -331,19 +350,19 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
                             aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
                             aws configure set region ${AWS_REGION}
-                            
+
                             # Force new deployment on ECS
                             aws ecs update-service \
                                 --cluster ${ECS_CLUSTER} \
                                 --service ${ECS_SERVICE} \
                                 --force-new-deployment \
                                 --region ${AWS_REGION}
-                            
+
                             echo "ECS deployment initiated successfully"
-                            
+
                             # Wait for service to stabilize
                             sleep 30
-                            
+
                             # Check deployment status
                             aws ecs describe-services \
                                 --cluster ${ECS_CLUSTER} \
@@ -359,8 +378,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Verify AWS Deployment') {
             steps {
                 script {
-                    echo "Verifying AWS deployment"
-                    
+                    echo 'Verifying AWS deployment'
+
                     withCredentials([[
                         $class: 'UsernamePasswordMultiBinding',
                         credentialsId: env.AWS_CREDENTIALS_ID,
@@ -373,7 +392,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
                             aws configure set region ${AWS_REGION}
                         """
-                        
+
                         // Get ALB DNS name
                         def albDns = sh(
                             script: """
@@ -384,11 +403,11 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             """,
                             returnStdout: true
                         ).trim()
-                        
+
                         if (albDns) {
                             echo "Application Load Balancer DNS: ${albDns}"
-                            echo "Testing application endpoint"
-                            
+                            echo 'Testing application endpoint'
+
                             // Test health endpoint
                             sh """
                                 curl -s -f http://${albDns}:5000/health && echo "Health check passed" || echo "Health check failed"
@@ -396,7 +415,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 curl -s http://${albDns}:5000/ | head -n 5
                             """
                         } else {
-                            echo "ALB DNS not found, deployment might still be in progress"
+                            echo 'ALB DNS not found, deployment might still be in progress'
                         }
                     }
                 }
@@ -408,7 +427,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         always {
             script {
                 BUILD_STATUS = currentBuild.currentResult
-                
+
                 // Cleanup processes
                 sh """
                     echo "Cleaning up processes"
@@ -419,7 +438,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     fi
                     pkill -f "python.*app\\.py" 2>/dev/null || true
                     pkill -f "uvicorn" 2>/dev/null || true
-                    
+
                     # Clean Docker images to save space
                     docker rmi ${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} 2>/dev/null || true
                     docker rmi ${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} 2>/dev/null || true
@@ -430,7 +449,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 if (BUILD_STATUS == 'SUCCESS') {
                     statusColor = '#28a745'
                 } else if (BUILD_STATUS == 'UNSTABLE') {
-                    statusColor = '#ffc107' 
+                    statusColor = '#ffc107'
                 } else {
                     statusColor = '#dc3545'
                 }
@@ -449,9 +468,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     .replace('${BUILD_URL}', env.BUILD_URL ?: 'N/A')
                     .replace('${AWS_REGION}', env.AWS_REGION ?: 'N/A')
                     .replace('${ECS_CLUSTER}', env.ECS_CLUSTER ?: 'N/A')
-                    .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
+                    .replace('${CURRENT_YEAR}', new Date().format('yyyy'))
 
-                emailext (
+                emailext(
                     subject: "Build ${BUILD_STATUS}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
                     body: emailBody,
                     to: env.EMAIL_RECipients,
@@ -460,17 +479,17 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
             cleanWs()
         }
-        
+
         success {
-            echo "Build completed successfully! Application deployed to AWS ECS."
+            echo 'Build completed successfully! Application deployed to AWS ECS.'
         }
-        
+
         failure {
-            echo "Build failed! Check logs for details."
+            echo 'Build failed! Check logs for details.'
         }
-        
+
         unstable {
-            echo "Build unstable! Some tests may have failed."
+            echo 'Build unstable! Some tests may have failed.'
         }
     }
 }
