@@ -35,7 +35,7 @@ pipeline {
             steps {
                 sh '''
                     sudo apt update -y
-                    sudo apt install -y python3 python3-pip python3-venv curl docker.io
+                    sudo apt install -y python3 python3-pip python3-venv curl unzip docker.io
                     python3 -m venv ${VENV_PATH}
                     ${VENV_PATH}/bin/pip install --upgrade pip
                     
@@ -290,7 +290,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         $class: 'AmazonWebServicesCredentialsBinding',
                         credentialsId: env.AWS_CREDENTIALS_ID,
                         accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                        secretKeyVariable: 'AWS_SECERT_ACCESS_KEY'
                     ]]) {
                         sh """
                             # Login to ECR
