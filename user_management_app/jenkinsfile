@@ -86,7 +86,7 @@ pipeline {
         stage('Start API Server') {
             steps {
                 script {
-                    echo "Starting API server :"
+                    echo "Starting API server"
                     sh """
                         cd ${APP_DIR}/api
                         nohup ${VENV_PATH}/bin/python app.py > /dev/null 2>&1 &
@@ -169,7 +169,7 @@ pipeline {
         stage('Push Metrics to Prometheus') {
             steps {
                 script {
-                    echo "Pushing metrics to Prometheus..."
+                    echo "Pushing metrics to Prometheus"
                     def metrics = """
 # HELP jenkins_custom_build_info Build information
 # TYPE jenkins_custom_build_info gauge
@@ -194,7 +194,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Stop API Server') {
             steps {
                 script {
-                    echo "Stopping API server :"
+                    echo "Stopping API server"
                     sh """
                         if [ -f ${API_PID_FILE} ]; then
                             PID=\$(cat ${API_PID_FILE})
@@ -216,7 +216,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Build Python Package') {
             steps {
                 script {
-                    echo "Building Python package :"
+                    echo "Building Python package"
                     sh '${VENV_PATH}/bin/pip install setuptools wheel'
                     sh """
                         cd ${APP_DIR}
@@ -224,7 +224,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     """
                     sh "ls -la ${APP_DIR}/dist/"
                     
-                    # Récupérer la version du package
+                    // Get package version
                     def packageVersion = sh(
                         script: "${VENV_PATH}/bin/python -c \"import setuptools; setup = setuptools.setup(); print(setup.get('version', 'N/A'))\" 2>/dev/null || echo 'N/A'",
                         returnStdout: true
@@ -237,7 +237,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Deploy to Nexus') {
             steps {
                 script {
-                    echo "Deploying to Nexus Sonatype : "
+                    echo "Deploying to Nexus Sonatype"
                     withCredentials([usernamePassword(
                         credentialsId: env.NEXUS_CREDENTIALS_ID,
                         usernameVariable: 'NEXUS_USER',
@@ -259,7 +259,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Build Docker Images') {
             steps {
                 script {
-                    echo "Building Docker images for AWS ECR..."
+                    echo "Building Docker images for AWS ECR"
                     
                     // Build API image
                     sh """
@@ -284,7 +284,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Push to AWS ECR') {
             steps {
                 script {
-                    echo "Pushing Docker images to AWS ECR..."
+                    echo "Pushing Docker images to AWS ECR"
                     
                     withCredentials([[
                         $class: 'AmazonWebServicesCredentialsBinding',
@@ -312,7 +312,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Deploy to AWS ECS') {
             steps {
                 script {
-                    echo "Deploying to AWS ECS..."
+                    echo "Deploying to AWS ECS"
                     
                     withCredentials([[
                         $class: 'AmazonWebServicesCredentialsBinding',
@@ -348,7 +348,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Verify AWS Deployment') {
             steps {
                 script {
-                    echo "Verifying AWS deployment..."
+                    echo "Verifying AWS deployment"
                     
                     withCredentials([[
                         $class: 'AmazonWebServicesCredentialsBinding',
@@ -356,7 +356,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                         secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        // Get ALB DNS name from Terraform output or describe
+                        // Get ALB DNS name
                         def albDns = sh(
                             script: """
                                 aws elbv2 describe-load-balancers \
@@ -369,11 +369,11 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         
                         if (albDns) {
                             echo "Application Load Balancer DNS: ${albDns}"
-                            echo "Testing application endpoint..."
+                            echo "Testing application endpoint"
                             
                             // Test health endpoint
                             sh """
-                                curl -s -f http://${albDns}:5000/health && echo "Health check passed!" || echo "Health check failed"
+                                curl -s -f http://${albDns}:5000/health && echo "Health check passed" || echo "Health check failed"
                                 sleep 5
                                 curl -s http://${albDns}:5000/ | head -n 5
                             """
@@ -393,7 +393,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 
                 // Cleanup processes
                 sh """
-                    echo "Cleaning up processes..."
+                    echo "Cleaning up processes"
                     if [ -f ${API_PID_FILE} ]; then
                         PID=\$(cat ${API_PID_FILE})
                         kill \$PID 2>/dev/null || true
