@@ -20,9 +20,9 @@ pipeline {
 
         PYTHON_PACKAGE_VERSION = 'N/A'
         
-        // Variables AWS
+        // Variables AWS - REMPLACEZ PAR VOS VRAIES VALEURS
         AWS_REGION = 'us-east-1'
-        AWS_ECR_REGISTRY = 'your-account-id.dkr.ecr.us-east-1.amazonaws.com'
+        AWS_ECR_REGISTRY = '123456789012.dkr.ecr.us-east-1.amazonaws.com' // Remplacez par votre vrai AWS Account ID
         ECR_API_REPOSITORY = 'user-management-api'
         ECR_CLIENT_REPOSITORY = 'user-management-client'
         ECS_CLUSTER = 'user-management-cluster'
@@ -149,7 +149,7 @@ pipeline {
                                 cd ${APP_DIR}/robot_tests
                                 set +e
                                 ${VENV_PATH}/bin/robot \
-                                    --outputdir ${ROBOT_REPORTS_DIR} \
+                                    --outputdir ${ROBOT_REORTS_DIR} \
                                     --output output.xml \
                                     --report report.html \
                                     --log log.html \
@@ -308,23 +308,24 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        sh """
-                            # Configure AWS CLI avec les credentials
-                            aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
-                            aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
-                            aws configure set region ${AWS_REGION}
+                        sh '''
+                            # Configure AWS CLI avec les credentials - SÉCURISÉ
+                            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region '"'${AWS_REGION}'"'
                             
                             # Login to ECR
-                            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ECR_REGISTRY}
+                            ECR_PASSWORD=$(aws ecr get-login-password --region '"'${AWS_REGION}'"')
+                            echo "$ECR_PASSWORD" | docker login --username AWS --password-stdin '"'${AWS_ECR_REGISTRY}'"'
                             
                             # Push API image
-                            docker push ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest || echo "API image push failed"
+                            docker push '"'${AWS_ECR_REGISTRY}'"'/'"'${ECR_API_REPOSITORY}'"':latest || echo "API image push failed"
                             
                             # Push Client image
-                            docker push ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest || echo "Client image push failed"
+                            docker push '"'${AWS_ECR_REGISTRY}'"'/'"'${ECR_CLIENT_REPOSITORY}'"':latest || echo "Client image push failed"
                             
                             echo "Images push completed"
-                        """
+                        '''
                     }
                 }
             }
@@ -341,18 +342,18 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        sh """
-                            # Configure AWS CLI
-                            aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
-                            aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
-                            aws configure set region ${AWS_REGION}
+                        sh '''
+                            # Configure AWS CLI - SÉCURISÉ
+                            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region '"'${AWS_REGION}'"'
                             
                             # Force new deployment on ECS
                             aws ecs update-service \
-                                --cluster ${ECS_CLUSTER} \
-                                --service ${ECS_SERVICE} \
+                                --cluster '"'${ECS_CLUSTER}'"' \
+                                --service '"'${ECS_SERVICE}'"' \
                                 --force-new-deployment \
-                                --region ${AWS_REGION} || echo "ECS deployment failed"
+                                --region '"'${AWS_REGION}'"' || echo "ECS deployment failed"
                             
                             echo "ECS deployment initiated"
                             
@@ -361,11 +362,11 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             
                             # Check deployment status
                             aws ecs describe-services \
-                                --cluster ${ECS_CLUSTER} \
-                                --services ${ECS_SERVICE} \
-                                --region ${AWS_REGION} \
+                                --cluster '"'${ECS_CLUSTER}'"' \
+                                --services '"'${ECS_SERVICE}'"' \
+                                --region '"'${AWS_REGION}'"' \
                                 --query 'services[0].deployments[0]' || echo "Failed to check deployment status"
-                        """
+                        '''
                     }
                 }
             }
@@ -382,12 +383,12 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        sh """
-                            # Configure AWS CLI
-                            aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
-                            aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
-                            aws configure set region ${AWS_REGION}
-                        """
+                        sh '''
+                            # Configure AWS CLI - SÉCURISÉ
+                            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region '"'${AWS_REGION}'"'
+                        '''
                         
                         // Get ALB DNS name
                         def albDns = sh(
@@ -428,7 +429,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 sh """
                     echo "Cleaning up processes"
                     if [ -f ${API_PID_FILE} ]; then
-                        PID=\$(cat ${API_PID_FILE})
+                        PID=\$(cat ${API_PID_FILE)
                         kill \$PID 2>/dev/null || true
                         rm -f ${API_PID_FILE}
                     fi
