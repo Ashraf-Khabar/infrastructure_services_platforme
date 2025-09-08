@@ -27,7 +27,7 @@ pipeline {
         ECS_CLUSTER = 'user-management-cluster'
         ECS_SERVICE = 'user-management-service'
         AWS_CREDENTIALS_ID = 'aws-credentials'
-        AWS_CREDENTIALS_AVAILABLE = false
+        AWS_CREDENTIALS_AVAILABLE = 'false'
     }
 
     stages {
@@ -64,14 +64,16 @@ pipeline {
                             passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                         ]]) {
                             echo "AWS credentials found successfully"
-                            env.AWS_CREDENTIALS_AVAILABLE = true
+                            env.AWS_CREDENTIALS_AVAILABLE = 'true'
                         }
                     } catch (Exception e) {
                         echo "WARNING: AWS credentials not found with ID: ${env.AWS_CREDENTIALS_ID}"
                         echo "Please create AWS IAM user and add credentials to Jenkins"
                         echo "Skipping AWS deployment stages"
-                        env.AWS_CREDENTIALS_AVAILABLE = false
+                        env.AWS_CREDENTIALS_AVAILABLE = 'false'
                     }
+                    
+                    echo "AWS_CREDENTIALS_AVAILABLE = ${env.AWS_CREDENTIALS_AVAILABLE}"
                 }
             }
         }
@@ -238,7 +240,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     echo "Stopping API server"
                     sh """
                         if [ -f ${API_PID_FILE} ]; then
-                            PID=\$(cat ${API_PID_FILE})
+                            PID=\$(cat ${API_PID_FILE)
                             echo "Stopping API process: \$PID"
                             kill \$PID 2>/dev/null || true
                             sleep 2
@@ -290,7 +292,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             ${VENV_PATH}/bin/twine upload \
                                 --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
                                 -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
-                                dist/* || echo "Nexus upload failed"
+                            
                         """
                     }
                 }
@@ -299,7 +301,10 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
 
         stage('Create ECR Repositories') {
             when {
-                expression { return env.AWS_CREDENTIALS_AVAILABLE == true }
+                expression { 
+                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${env.AWS_CREDENTIALS_AVAILABLE}"
+                    return env.AWS_CREDENTIALS_AVAILABLE == 'true' 
+                }
             }
             steps {
                 script {
@@ -340,7 +345,10 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
 
         stage('Build Docker Images') {
             when {
-                expression { return env.AWS_CREDENTIALS_AVAILABLE == true }
+                expression { 
+                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${env.AWS_CREDENTIALS_AVAILABLE}"
+                    return env.AWS_CREDENTIALS_AVAILABLE == 'true' 
+                }
             }
             steps {
                 script {
@@ -366,7 +374,10 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
 
         stage('Push to AWS ECR') {
             when {
-                expression { return env.AWS_CREDENTIALS_AVAILABLE == true }
+                expression { 
+                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${env.AWS_CREDENTIALS_AVAILABLE}"
+                    return env.AWS_CREDENTIALS_AVAILABLE == 'true' 
+                }
             }
             steps {
                 script {
@@ -405,7 +416,10 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
 
         stage('Deploy to AWS ECS') {
             when {
-                expression { return env.AWS_CREDENTIALS_AVAILABLE == true }
+                expression { 
+                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${env.AWS_CREDENTIALS_AVAILABLE}"
+                    return env.AWS_CREDENTIALS_AVAILABLE == 'true' 
+                }
             }
             steps {
                 script {
@@ -451,7 +465,10 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
 
         stage('Verify AWS Deployment') {
             when {
-                expression { return env.AWS_CREDENTIALS_AVAILABLE == true }
+                expression { 
+                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${env.AWS_CREDENTIALS_AVAILABLE}"
+                    return env.AWS_CREDENTIALS_AVAILABLE == 'true' 
+                }
             }
             steps {
                 script {
@@ -538,7 +555,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     statusColor = '#dc3545'
                 }
 
-                def awsDeploymentStatus = env.AWS_CREDENTIALS_AVAILABLE ? 'COMPLETED' : 'SKIPPED (No AWS credentials)'
+                def awsDeploymentStatus = (env.AWS_CREDENTIALS_AVAILABLE == 'true') ? 'COMPLETED' : 'SKIPPED (No AWS credentials)'
                 
                 def emailTemplate = readFile(file: env.EMAIL_TEMPLATE_PATH)
 
@@ -572,7 +589,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 echo "Build completed successfully!"
                 echo "Application deployed to:"
                 echo "- Nexus: ${env.NEXUS_URL}"
-                if (env.AWS_CREDENTIALS_AVAILABLE) {
+                if (env.AWS_CREDENTIALS_AVAILABLE == 'true') {
                     echo "- AWS ECR: ${env.AWS_ECR_REGISTRY}"
                     echo "- AWS ECS: ${env.ECS_CLUSTER}/${env.ECS_SERVICE}"
                 }
