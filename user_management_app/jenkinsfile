@@ -27,6 +27,7 @@ pipeline {
         ECS_CLUSTER = 'user-management-cluster'
         ECS_SERVICE = 'user-management-service'
         AWS_CREDENTIALS_ID = 'aws-credentials'
+        AWS_CREDENTIALS_AVAILABLE = 'True'
     }
 
     stages {
