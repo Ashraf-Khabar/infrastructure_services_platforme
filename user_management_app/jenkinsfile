@@ -20,14 +20,14 @@ pipeline {
 
         PYTHON_PACKAGE_VERSION = 'N/A'
         
-        // Variables AWS - REMPLACEZ PAR VOS VRAIES VALEURS
         AWS_REGION = 'us-east-1'
-        AWS_ECR_REGISTRY = '123456789012.dkr.ecr.us-east-1.amazonaws.com' // Remplacez par votre vrai AWS Account ID
+        AWS_ECR_REGISTRY = '123456789012.dkr.ecr.us-east-1.amazonaws.com'
         ECR_API_REPOSITORY = 'user-management-api'
         ECR_CLIENT_REPOSITORY = 'user-management-client'
         ECS_CLUSTER = 'user-management-cluster'
         ECS_SERVICE = 'user-management-service'
         AWS_CREDENTIALS_ID = 'aws-credentials'
+        AWS_CREDENTIALS_AVAILABLE = 'false'
     }
 
     stages {
@@ -39,6 +39,12 @@ pipeline {
                     python3 -m venv ${VENV_PATH}
                     ${VENV_PATH}/bin/pip install --upgrade pip
                     
+                    # Install AWS CLI
+                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                    unzip awscliv2.zip
+                    sudo ./aws/install
+                    rm -rf awscliv2.zip aws/
+                    
                     # Vérification des outils installés
                     echo "=== VERSIONS DES OUTILS ==="
                     echo "Python: $(python3 --version)"
@@ -47,6 +53,32 @@ pipeline {
                     echo "Docker: $(docker --version)"
                     echo "==========================="
                 '''
+            }
+        }
+
+        stage('Check AWS Configuration') {
+            steps {
+                script {
+                    echo "Checking AWS configuration..."
+                    
+                    // Vérifier si les credentials existent
+                    try {
+                        withCredentials([[
+                            $class: 'UsernamePasswordMultiBinding',
+                            credentialsId: env.AWS_CREDENTIALS_ID,
+                            usernameVariable: 'AWS_ACCESS_KEY_ID',
+                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                        ]]) {
+                            echo "AWS credentials found successfully"
+                            env.AWS_CREDENTIALS_AVAILABLE = 'true'
+                        }
+                    } catch (Exception e) {
+                        echo "WARNING: AWS credentials not found with ID: ${env.AWS_CREDENTIALS_ID}"
+                        echo "Please create AWS IAM user and add credentials to Jenkins"
+                        echo "Skipping AWS deployment stages"
+                        env.AWS_CREDENTIALS_AVAILABLE = 'false'
+                    }
+                }
             }
         }
 
@@ -86,7 +118,6 @@ pipeline {
                     steps {
                         sh """
                             ${VENV_PATH}/bin/pip install boto3
-                            ${VENV_PATH}/bin/pip install awscli
                         """
                     }
                 }
@@ -263,7 +294,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             cd ${APP_DIR}
                             ${VENV_PATH}/bin/pip install twine
                             ${VENV_PATH}/bin/twine upload \
-                                --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
+                                --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSitORY}/ \
                                 -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
                                 dist/* || echo "Nexus upload failed"
                         """
@@ -272,19 +303,61 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
         }
 
+        stage('Create ECR Repositories') {
+            when {
+                expression { return env.AWS_CREDENTIALS_AVAILABLE == 'true' }
+            }
+            steps {
+                script {
+                    echo "Creating ECR repositories if they don't exist"
+                    
+                    withCredentials([[
+                        $class: 'UsernamePasswordMultiBinding',
+                        credentialsId: env.AWS_CREDENTIALS_ID,
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh """
+                            # Configure AWS CLI
+                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region ${AWS_REGION}
+                            
+                            # Créer le repository API s'il n'existe pas
+                            if ! aws ecr describe-repositories --repository-names ${ECR_API_REPOSITORY} >/dev/null 2>&1; then
+                                echo "Creating ECR repository: ${ECR_API_REPOSITORY}"
+                                aws ecr create-repository --repository-name ${ECR_API_REPOSITORY}
+                            else
+                                echo "ECR repository already exists: ${ECR_API_REPOSITORY}"
+                            fi
+                            
+                            # Créer le repository Client s'il n'existe pas
+                            if ! aws ecr describe-repositories --repository-names ${ECR_CLIENT_REPOSITORY} >/dev/null 2>&1; then
+                                echo "Creating ECR repository: ${ECR_CLIENT_REPOSITORY}"
+                                aws ecr create-repository --repository-name ${ECR_CLIENT_REPOSITORY}
+                            else
+                                echo "ECR repository already exists: ${ECR_CLIENT_REPOSITORY}"
+                            fi
+                        """
+                    }
+                }
+            }
+        }
+
         stage('Build Docker Images') {
+            when {
+                expression { return env.AWS_CREDENTIALS_AVAILABLE == 'true' }
+            }
             steps {
                 script {
                     echo "Building Docker images for AWS ECR"
-                    
-                    // Build API image
+
                     sh """
                         cd ${APP_DIR}/api
                         docker build -t ${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} .
                         docker tag ${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
                     """
-                    
-                    // Build Client image
+
                     sh """
                         cd ${APP_DIR}/client
                         docker build -t ${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} .
@@ -298,6 +371,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         }
 
         stage('Push to AWS ECR') {
+            when {
+                expression { return env.AWS_CREDENTIALS_AVAILABLE == 'true' }
+            }
             steps {
                 script {
                     echo "Pushing Docker images to AWS ECR"
@@ -309,7 +385,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
                         sh """
-                            # Configure AWS CLI avec les credentials
+                            # Configure AWS CLI
                             aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
                             aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
@@ -319,12 +395,14 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             echo "\$ECR_PASSWORD" | docker login --username AWS --password-stdin ${AWS_ECR_REGISTRY}
                             
                             # Push API image
-                            docker push ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest || echo "API image push failed"
+                            echo "Pushing API image..."
+                            docker push ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
                             
                             # Push Client image
-                            docker push ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest || echo "Client image push failed"
+                            echo "Pushing Client image..."
+                            docker push ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
                             
-                            echo "Images push completed"
+                            echo "All images pushed successfully to ECR"
                         """
                     }
                 }
@@ -332,6 +410,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         }
 
         stage('Deploy to AWS ECS') {
+            when {
+                expression { return env.AWS_CREDENTIALS_AVAILABLE == 'true' }
+            }
             steps {
                 script {
                     echo "Deploying to AWS ECS"
@@ -349,23 +430,25 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set region ${AWS_REGION}
                             
                             # Force new deployment on ECS
-                            aws ecs update-service \\
-                                --cluster ${ECS_CLUSTER} \\
-                                --service ${ECS_SERVICE} \\
-                                --force-new-deployment \\
-                                --region ${AWS_REGION} || echo "ECS deployment failed"
+                            echo "Initiating ECS deployment..."
+                            aws ecs update-service \
+                                --cluster ${ECS_CLUSTER} \
+                                --service ${ECS_SERVICE} \
+                                --force-new-deployment \
+                                --region ${AWS_REGION}
                             
-                            echo "ECS deployment initiated"
+                            echo "ECS deployment initiated successfully"
                             
                             # Wait for service to stabilize
-                            sleep 30
+                            sleep 10
                             
                             # Check deployment status
-                            aws ecs describe-services \\
-                                --cluster ${ECS_CLUSTER} \\
-                                --services ${ECS_SERVICE} \\
-                                --region ${AWS_REGION} \\
-                                --query 'services[0].deployments[0]' || echo "Failed to check deployment status"
+                            echo "Checking deployment status..."
+                            aws ecs describe-services \
+                                --cluster ${ECS_CLUSTER} \
+                                --services ${ECS_SERVICE} \
+                                --region ${AWS_REGION} \
+                                --query 'services[0].deployments[0]'
                         """
                     }
                 }
@@ -373,6 +456,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         }
 
         stage('Verify AWS Deployment') {
+            when {
+                expression { return env.AWS_CREDENTIALS_AVAILABLE == 'true' }
+            }
             steps {
                 script {
                     echo "Verifying AWS deployment"
@@ -390,29 +476,35 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set region ${AWS_REGION}
                         """
                         
-                        // Get ALB DNS name
+                        // Try to get ALB DNS
                         def albDns = sh(
                             script: """
-                                aws elbv2 describe-load-balancers \\
-                                    --region ${AWS_REGION} \\
-                                    --query 'LoadBalancers[?contains(LoadBalancerName, \\\\`user-management\\\\`)].DNSName' \\
-                                    --output text 2>/dev/null || echo ""
+                                aws elbv2 describe-load-balancers \
+                                    --region ${AWS_REGION} \
+                                    --query 'LoadBalancers[?contains(LoadBalancerName, \\`user-management\\`)].DNSName' \
+                                    --output text 2>/dev/null || echo "NOT_FOUND"
                             """,
                             returnStdout: true
                         ).trim()
                         
-                        if (albDns && !albDns.isEmpty()) {
+                        if (albDns != "NOT_FOUND" && !albDns.isEmpty()) {
                             echo "Application Load Balancer DNS: ${albDns}"
-                            echo "Testing application endpoint"
+                            echo "Testing application endpoints..."
                             
-                            // Test health endpoint
                             sh """
-                                curl -s -f http://${albDns}:5000/health && echo "Health check passed" || echo "Health check failed"
-                                sleep 5
-                                curl -s http://${albDns}:5000/ | head -n 5 || echo "Failed to connect to application"
+                                # Test health endpoint
+                                echo "Testing health endpoint..."
+                                curl -s -f http://${albDns}:5000/health && echo "✓ Health check passed" || echo "✗ Health check failed"
+                                
+                                # Test main endpoint
+                                echo "Testing main endpoint..."
+                                curl -s http://${albDns}:5000/ | head -n 3 || echo "✗ Main endpoint failed"
+                                
+                                sleep 2
                             """
                         } else {
-                            echo "ALB DNS not found, deployment might still be in progress"
+                            echo "ALB DNS not found. Deployment might still be in progress."
+                            echo "Check ECS console for deployment status."
                         }
                     }
                 }
@@ -425,9 +517,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             script {
                 env.BUILD_STATUS = currentBuild.currentResult
                 
-                // Cleanup processes
                 sh """
-                    echo "Cleaning up processes"
+                    echo "Cleaning up processes and resources"
                     if [ -f ${API_PID_FILE} ]; then
                         PID=\$(cat ${API_PID_FILE})
                         kill \$PID 2>/dev/null || true
@@ -439,6 +530,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     # Clean Docker images to save space
                     docker rmi ${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} 2>/dev/null || true
                     docker rmi ${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} 2>/dev/null || true
+                    docker rmi ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest 2>/dev/null || true
+                    docker rmi ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest 2>/dev/null || true
                     echo "Cleanup completed"
                 """
 
@@ -446,7 +539,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 if (env.BUILD_STATUS == 'SUCCESS') {
                     statusColor = '#28a745'
                 } else if (env.BUILD_STATUS == 'UNSTABLE') {
-                    statusColor = '##ffc107' 
+                    statusColor = '#ffc107' 
                 } else {
                     statusColor = '#dc3545'
                 }
@@ -465,6 +558,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     .replace('${BUILD_URL}', env.BUILD_URL ?: 'N/A')
                     .replace('${AWS_REGION}', env.AWS_REGION ?: 'N/A')
                     .replace('${ECS_CLUSTER}', env.ECS_CLUSTER ?: 'N/A')
+                    .replace('${AWS_DEPLOYMENT_STATUS}', env.AWS_CREDENTIALS_AVAILABLE == 'true' ? 'COMPLETED' : 'SKIPPED (No AWS credentials)')
                     .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
 
                 emailext (
@@ -478,7 +572,13 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         }
         
         success {
-            echo "Build completed successfully! Application deployed to AWS ECS."
+            echo "Build completed successfully!"
+            echo "Application deployed to:"
+            echo "- Nexus: ${env.NEXUS_URL}"
+            if (env.AWS_CREDENTIALS_AVAILABLE == 'true') {
+                echo "- AWS ECR: ${env.AWS_ECR_REGISTRY}"
+                echo "- AWS ECS: ${env.ECS_CLUSTER}/${env.ECS_SERVICE}"
+            }
         }
         
         failure {
