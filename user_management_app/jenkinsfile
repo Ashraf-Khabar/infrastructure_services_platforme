@@ -294,7 +294,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             cd ${APP_DIR}
                             ${VENV_PATH}/bin/pip install twine
                             ${VENV_PATH}/bin/twine upload \
-                                --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSitORY}/ \
+                                --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
                                 -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
                                 dist/* || echo "Nexus upload failed"
                         """
@@ -544,6 +544,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     statusColor = '#dc3545'
                 }
 
+                def awsDeploymentStatus = env.AWS_CREDENTIALS_AVAILABLE == 'true' ? 'COMPLETED' : 'SKIPPED (No AWS credentials)'
+                
                 def emailTemplate = readFile(file: env.EMAIL_TEMPLATE_PATH)
 
                 def emailBody = emailTemplate
@@ -558,7 +560,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     .replace('${BUILD_URL}', env.BUILD_URL ?: 'N/A')
                     .replace('${AWS_REGION}', env.AWS_REGION ?: 'N/A')
                     .replace('${ECS_CLUSTER}', env.ECS_CLUSTER ?: 'N/A')
-                    .replace('${AWS_DEPLOYMENT_STATUS}', env.AWS_CREDENTIALS_AVAILABLE == 'true' ? 'COMPLETED' : 'SKIPPED (No AWS credentials)')
+                    .replace('${AWS_DEPLOYMENT_STATUS}', awsDeploymentStatus)
                     .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
 
                 emailext (
@@ -572,12 +574,14 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         }
         
         success {
-            echo "Build completed successfully!"
-            echo "Application deployed to:"
-            echo "- Nexus: ${env.NEXUS_URL}"
-            if (env.AWS_CREDENTIALS_AVAILABLE == 'true') {
-                echo "- AWS ECR: ${env.AWS_ECR_REGISTRY}"
-                echo "- AWS ECS: ${env.ECS_CLUSTER}/${env.ECS_SERVICE}"
+            script {
+                echo "Build completed successfully!"
+                echo "Application deployed to:"
+                echo "- Nexus: ${env.NEXUS_URL}"
+                if (env.AWS_CREDENTIALS_AVAILABLE == 'true') {
+                    echo "- AWS ECR: ${env.AWS_ECR_REGISTRY}"
+                    echo "- AWS ECS: ${env.ECS_CLUSTER}/${env.ECS_SERVICE}"
+                }
             }
         }
         
