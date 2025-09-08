@@ -21,7 +21,7 @@ pipeline {
         PYTHON_PACKAGE_VERSION = 'N/A'
         
         AWS_REGION = 'us-east-1'
-        AWS_ECR_REGISTRY = '123456789012.dkr.ecr.us-east-1.amazonaws.com'
+        AWS_ECR_REGISTRY = '036386574460.dkr.ecr.us-east-1.amazonaws.com'
         ECR_API_REPOSITORY = 'user-management-api'
         ECR_CLIENT_REPOSITORY = 'user-management-client'
         ECS_CLUSTER = 'user-management-cluster'
