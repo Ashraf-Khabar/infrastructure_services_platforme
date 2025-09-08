@@ -27,6 +27,13 @@ pipeline {
         ECS_CLUSTER = 'user-management-cluster'
         ECS_SERVICE = 'user-management-service'
         AWS_CREDENTIALS_ID = 'aws-credentials'
+        
+        ECS_TASK_DEFINITION = 'user-management-task'
+        SUBNET_IDS = 'subnet-abc12345,subnet-def67890'
+        SECURITY_GROUP_ID = 'sg-12345678'
+        
+        APPLICATION_URL = 'N/A'
+        APPLICATION_HEALTH = 'N/A'
     }
 
     stages {
@@ -200,26 +207,6 @@ pipeline {
 
         stage('Push Metrics to Prometheus') {
             steps {
-                script {
-                    echo "Pushing metrics to Prometheus"
-                    def metrics = """
-# HELP jenkins_custom_build_info Build information
-# TYPE jenkins_custom_build_info gauge
-jenkins_custom_build_info{job="${env.JOB_NAME}", build_number="${env.BUILD_NUMBER}", result="${currentBuild.currentResult}"} 1
-
-# HELP jenkins_custom_build_duration_seconds Build duration in seconds
-# TYPE jenkins_custom_build_duration_seconds gauge
-jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.duration / 1000}
-"""
-                    try {
-                        sh """
-                            echo '${metrics}' | curl --connect-timeout 5 --max-time 10 -X POST --data-binary @- ${PROMETHEUS_PUSH_GATEWAY}/metrics/job/jenkins/instance/${env.JOB_NAME} || echo "Prometheus push failed"
-                        """
-                        echo "Metrics pushed to Prometheus successfully"
-                    } catch (Exception e) {
-                        echo "Failed to push metrics to Prometheus"
-                    }
-                }
             }
         }
 
@@ -348,7 +335,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             
                             if ! aws ecr describe-repositories --repository-names ${ECR_CLIENT_REPOSITORY} >/dev/null 2>&1; then
                                 echo "Creating ECR repository: ${ECR_CLIENT_REPOSITORY}"
-                                aws ecr create-repository --repository-name ${ECR_CLIENT_REPOSitORY}
+                                aws ecr create-repository --repository-name ${ECR_CLIENT_REPOSITORY}
                             else
                                 echo "ECR repository already exists: ${ECR_CLIENT_REPOSITORY}"
                             fi
@@ -447,6 +434,129 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
         }
 
+        stage('Create ECS Cluster if Needed') {
+            when {
+                expression { 
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    return status == 'true' 
+                }
+            }
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'UsernamePasswordMultiBinding',
+                        credentialsId: env.AWS_CREDENTIALS_ID,
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh """
+                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region ${AWS_REGION}
+                            
+                            if ! aws ecs describe-clusters --clusters ${ECS_CLUSTER} --region ${AWS_REGION} >/dev/null 2>&1; then
+                                echo "Creating ECS cluster: ${ECS_CLUSTER}"
+                                aws ecs create-cluster --cluster-name ${ECS_CLUSTER} --region ${AWS_REGION}
+                                sleep 10
+                            else
+                                echo "ECS cluster already exists: ${ECS_CLUSTER}"
+                            fi
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Create ECS Task Definition') {
+            when {
+                expression { 
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    return status == 'true' 
+                }
+            }
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'UsernamePasswordMultiBinding',
+                        credentialsId: env.AWS_CREDENTIALS_ID,
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh """
+                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region ${AWS_REGION}
+                            
+                            echo "Creating ECS Task Definition"
+                            
+                            cat > task-definition.json << EOF
+{
+    "family": "${ECS_TASK_DEFINITION}",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "256",
+    "memory": "512",
+    "executionRoleArn": "arn:aws:iam::036386574460:role/ecsTaskExecutionRole",
+    "containerDefinitions": [
+        {
+            "name": "user-management-api",
+            "image": "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest",
+            "essential": true,
+            "portMappings": [
+                {
+                    "containerPort": 5000,
+                    "protocol": "tcp"
+                }
+            ],
+            "environment": [
+                {"name": "ENVIRONMENT", "value": "production"}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/user-management",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            }
+        },
+        {
+            "name": "user-management-client",
+            "image": "${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest",
+            "essential": true,
+            "portMappings": [
+                {
+                    "containerPort": 3000,
+                    "protocol": "tcp"
+                }
+            ],
+            "environment": [
+                {"name": "ENVIRONMENT", "value": "production"}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/user-management",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            }
+        }
+    ]
+}
+EOF
+
+                            aws ecs register-task-definition \
+                                --cli-input-json file://task-definition.json \
+                                --region ${AWS_REGION}
+                            
+                            echo "ECS Task Definition created successfully"
+                        """
+                    }
+                }
+            }
+        }
+
         stage('Create ECS Service if Needed') {
             when {
                 expression { 
@@ -468,9 +578,21 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set region ${AWS_REGION}
                             
                             if ! aws ecs describe-services --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE} --region ${AWS_REGION} >/dev/null 2>&1; then
-                                echo "Service ${ECS_SERVICE} does not exist. You need to create it first."
+                                echo "Service ${ECS_SERVICE} does not exist. Creating it..."
+                                
+                                aws ecs create-service \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --service-name ${ECS_SERVICE} \
+                                    --task-definition ${ECS_TASK_DEFINITION} \
+                                    --desired-count 1 \
+                                    --launch-type FARGATE \
+                                    --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
+                                    --region ${AWS_REGION}
+                                
+                                echo "ECS service created: ${ECS_SERVICE}"
+                                sleep 30
                             else
-                                echo "ECS service exists: ${ECS_SERVICE}"
+                                echo "ECS service already exists: ${ECS_SERVICE}"
                             fi
                         """
                     }
@@ -498,14 +620,6 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
-                            if ! aws ecs describe-clusters --clusters ${ECS_CLUSTER} --region ${AWS_REGION} >/dev/null 2>&1; then
-                                echo "Creating ECS cluster: ${ECS_CLUSTER}"
-                                aws ecs create-cluster --cluster-name ${ECS_CLUSTER} --region ${AWS_REGION}
-                                sleep 10
-                            else
-                                echo "ECS cluster already exists: ${ECS_CLUSTER}"
-                            fi
-                            
                             echo "Initiating ECS deployment..."
                             aws ecs update-service \
                                 --cluster ${ECS_CLUSTER} \
@@ -514,13 +628,22 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 --region ${AWS_REGION}
                             
                             echo "ECS deployment initiated successfully"
+                            
+                            sleep 10
+                            
+                            echo "Checking deployment status..."
+                            aws ecs describe-services \
+                                --cluster ${ECS_CLUSTER} \
+                                --services ${ECS_SERVICE} \
+                                --region ${AWS_REGION} \
+                                --query 'services[0].deployments[0]'
                         """
                     }
                 }
             }
         }
 
-        stage('Verify AWS Deployment') {
+        stage('Display Application Access Info') {
             when {
                 expression { 
                     def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
@@ -540,17 +663,81 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
-                            albDns=\$(aws elbv2 describe-load-balancers --region ${AWS_REGION} --query 'LoadBalancers[?contains(LoadBalancerName, \\`user-management\\`)].DNSName' --output text 2>/dev/null || echo "NOT_FOUND")
+                            echo "=== APPLICATION ACCESS INFORMATION ==="
+                            echo ""
                             
-                            if [ "\$albDns" != "NOT_FOUND" ] && [ ! -z "\$albDns" ]; then
-                                echo "Application Load Balancer DNS: \$albDns"
-                                echo "Testing application endpoints..."
-                                curl -s -f http://\${albDns}:5000/health && echo "✓ Health check passed" || echo "✗ Health check failed"
-                                curl -s http://\${albDns}:5000/ | head -n 3 || echo "✗ Main endpoint failed"
+                            TASK_ARN=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'taskArns[0]' --output text)
+                            
+                            if [ "\$TASK_ARN" != "None" ] && [ ! -z "\$TASK_ARN" ]; then
+                                echo "✓ ECS Task Found: \$TASK_ARN"
+                                
+                                ENI_ID=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$TASK_ARN --region ${AWS_REGION} --query 'tasks[0].attachments[0].details[?name==\\`networkInterfaceId\\`].value' --output text)
+                                
+                                if [ "\$ENI_ID" != "None" ] && [ ! -z "\$ENI_ID" ]; then
+                                    PUBLIC_IP=\$(aws ec2 describe-network-interfaces --network-interface-ids \$ENI_ID --region ${AWS_REGION} --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+                                    
+                                    if [ "\$PUBLIC_IP" != "None" ] && [ ! -z "\$PUBLIC_IP" ]; then
+                                        echo "🎉 YOUR APPLICATION IS READY!"
+                                        echo ""
+                                        echo "🌐 API Endpoint: http://\${PUBLIC_IP}:5000"
+                                        echo "🩺 Health Check: http://\${PUBLIC_IP}:5000/health"
+                                        echo "👥 Users API: http://\${PUBLIC_IP}:5000/users"
+                                        echo ""
+                                        echo "📋 Quick test commands:"
+                                        echo "  curl http://\${PUBLIC_IP}:5000/health"
+                                        echo "  curl http://\${PUBLIC_IP}:5000/"
+                                        echo ""
+                                    else
+                                        PRIVATE_IP=\$(aws ec2 describe-network-interfaces --network-interface-ids \$ENI_ID --region ${AWS_REGION} --query 'NetworkInterfaces[0].PrivateIpAddress' --output text)
+                                        if [ "\$PRIVATE_IP" != "None" ] && [ ! -z "\$PRIVATE_IP" ]; then
+                                            echo "🔒 Application running with private IP (may need VPN):"
+                                            echo "   Private IP: \$PRIVATE_IP"
+                                            echo "   API: http://\${PRIVATE_IP}:5000"
+                                        fi
+                                    fi
+                                fi
+                                
+                                ALB_DNS=\$(aws elbv2 describe-load-balancers --region ${AWS_REGION} --query 'LoadBalancers[?contains(LoadBalancerName, \\`user-management\\`)].DNSName' --output text 2>/dev/null || echo "NOT_FOUND")
+                                
+                                if [ "\$ALB_DNS" != "NOT_FOUND" ] && [ ! -z "\$ALB_DNS" ]; then
+                                    echo "📡 Load Balancer Detected:"
+                                    echo "   ALB DNS: \$ALB_DNS"
+                                    echo "   API: http://\${ALB_DNS}:5000"
+                                    echo "   Health: http://\${ALB_DNS}:5000/health"
+                                fi
+                                
                             else
-                                echo "ALB DNS not found. Deployment might still be in progress."
+                                echo "⏳ No running tasks found yet. Service may still be provisioning."
+                                echo "   Run this command later to check:"
+                                echo "   aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION}"
                             fi
+                            
+                            echo ""
+                            echo "=== TROUBLESHOOTING ==="
+                            echo "If you can't access the application:"
+                            echo "1. Check security group inbound rules on port 5000"
+                            echo "2. Wait a few minutes for ECS service to stabilize"
+                            echo "3. Check CloudWatch logs: /ecs/user-management"
+                            echo ""
+                            echo "To view logs:"
+                            echo "aws logs describe-log-streams --log-group-name /ecs/user-management --region ${AWS_REGION}"
+                            echo ""
                         """
+                        
+                        def taskArn = sh(script: "aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'taskArns[0]' --output text", returnStdout: true).trim()
+                        
+                        if (taskArn != "None" && !taskArn.isEmpty()) {
+                            def eniId = sh(script: "aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks $taskArn --region ${AWS_REGION} --query 'tasks[0].attachments[0].details[?name==\\`networkInterfaceId\\`].value' --output text", returnStdout: true).trim()
+                            
+                            if (eniId != "None" && !eniId.isEmpty()) {
+                                def publicIp = sh(script: "aws ec2 describe-network-interfaces --network-interface-ids $eniId --region ${AWS_REGION} --query 'NetworkInterfaces[0].Association.PublicIp' --output text", returnStdout: true).trim()
+                                
+                                if (publicIp != "None" && !publicIp.isEmpty()) {
+                                    env.APPLICATION_URL = "http://${publicIp}:5000"
+                                    env.APPLICATION_HEALTH = "http://${publicIp}:5000/health"
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -580,6 +767,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     docker rmi ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest 2>/dev/null || true
                     
                     rm -f /tmp/aws_credentials_available 2>/dev/null || true
+                    rm -f task-definition.json 2>/dev/null || true
                     echo "Cleanup completed"
                 """
 
@@ -607,6 +795,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     .replace('${AWS_REGION}', env.AWS_REGION ?: 'N/A')
                     .replace('${ECS_CLUSTER}', env.ECS_CLUSTER ?: 'N/A')
                     .replace('${AWS_DEPLOYMENT_STATUS}', awsDeploymentStatus)
+                    .replace('${APPLICATION_URL}', env.APPLICATION_URL ?: 'Check Jenkins console for access details')
+                    .replace('${APPLICATION_HEALTH}', env.APPLICATION_HEALTH ?: 'Check Jenkins console for access details')
                     .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
 
                 emailext (
@@ -626,6 +816,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 if (awsStatus == 'true') {
                     echo "- AWS ECR: ${env.AWS_ECR_REGISTRY}"
                     echo "- AWS ECS: ${env.ECS_CLUSTER}/${env.ECS_SERVICE}"
+                    if (env.APPLICATION_URL != 'N/A') {
+                        echo "- Application URL: ${env.APPLICATION_URL}"
+                    }
                 }
             }
         }
