@@ -27,7 +27,6 @@ pipeline {
         ECS_CLUSTER = 'user-management-cluster'
         ECS_SERVICE = 'user-management-service'
         AWS_CREDENTIALS_ID = 'aws-credentials'
-        AWS_CREDENTIALS_AVAILABLE = 'false'
     }
 
     stages {
@@ -64,16 +63,19 @@ pipeline {
                             passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                         ]]) {
                             echo "AWS credentials found successfully"
-                            env.AWS_CREDENTIALS_AVAILABLE = 'true'
+                            // Utiliser un fichier temporaire pour persister l'état
+                            sh 'echo "true" > /tmp/aws_credentials_available'
                         }
                     } catch (Exception e) {
                         echo "WARNING: AWS credentials not found with ID: ${env.AWS_CREDENTIALS_ID}"
                         echo "Please create AWS IAM user and add credentials to Jenkins"
                         echo "Skipping AWS deployment stages"
-                        env.AWS_CREDENTIALS_AVAILABLE = 'false'
+                        sh 'echo "false" > /tmp/aws_credentials_available'
                     }
                     
-                    echo "AWS_CREDENTIALS_AVAILABLE = ${env.AWS_CREDENTIALS_AVAILABLE}"
+                    // Lire et afficher la valeur pour vérification
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    echo "AWS_CREDENTIALS_AVAILABLE = ${status}"
                 }
             }
         }
