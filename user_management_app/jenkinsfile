@@ -27,7 +27,9 @@ pipeline {
         ECS_CLUSTER = 'user-management-cluster'
         ECS_SERVICE = 'user-management-service'
         AWS_CREDENTIALS_ID = 'aws-credentials'
-        AWS_CREDENTIALS_AVAILABLE = 'True'
+        
+        // Variable pour suivre la disponibilité AWS
+        AWS_CREDENTIALS_AVAILABLE = 'false'
     }
 
     stages {
@@ -64,19 +66,17 @@ pipeline {
                             passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                         ]]) {
                             echo "AWS credentials found successfully"
-                            // Utiliser un fichier temporaire pour persister l'état
-                            sh 'echo "true" > /tmp/aws_credentials_available'
+                            // Définir la variable d'environnement correctement
+                            env.AWS_CREDENTIALS_AVAILABLE = 'true'
                         }
                     } catch (Exception e) {
                         echo "WARNING: AWS credentials not found with ID: ${env.AWS_CREDENTIALS_ID}"
                         echo "Please create AWS IAM user and add credentials to Jenkins"
                         echo "Skipping AWS deployment stages"
-                        sh 'echo "false" > /tmp/aws_credentials_available'
+                        env.AWS_CREDENTIALS_AVAILABLE = 'false'
                     }
                     
-                    // Lire et afficher la valeur pour vérification
-                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
-                    echo "AWS_CREDENTIALS_AVAILABLE = ${status}"
+                    echo "AWS_CREDENTIALS_AVAILABLE = ${env.AWS_CREDENTIALS_AVAILABLE}"
                 }
             }
         }
@@ -305,8 +305,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Create ECR Repositories') {
             when {
                 expression { 
-                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${env.AWS_CREDENTIALS_AVAILABLE}"
-                    return env.AWS_CREDENTIALS_AVAILABLE == 'true' 
+                    return env.AWS_CREDENTIALS_AVAILABLE == 'true'
                 }
             }
             steps {
@@ -349,8 +348,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Build Docker Images') {
             when {
                 expression { 
-                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${env.AWS_CREDENTIALS_AVAILABLE}"
-                    return env.AWS_CREDENTIALS_AVAILABLE == 'true' 
+                    return env.AWS_CREDENTIALS_AVAILABLE == 'true'
                 }
             }
             steps {
@@ -378,8 +376,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Push to AWS ECR') {
             when {
                 expression { 
-                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${env.AWS_CREDENTIALS_AVAILABLE}"
-                    return env.AWS_CREDENTIALS_AVAILABLE == 'true' 
+                    return env.AWS_CREDENTIALS_AVAILABLE == 'true'
                 }
             }
             steps {
@@ -420,8 +417,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Deploy to AWS ECS') {
             when {
                 expression { 
-                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${env.AWS_CREDENTIALS_AVAILABLE}"
-                    return env.AWS_CREDENTIALS_AVAILABLE == 'true' 
+                    return env.AWS_CREDENTIALS_AVAILABLE == 'true'
                 }
             }
             steps {
@@ -469,8 +465,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Verify AWS Deployment') {
             when {
                 expression { 
-                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${env.AWS_CREDENTIALS_AVAILABLE}"
-                    return env.AWS_CREDENTIALS_AVAILABLE == 'true' 
+                    return env.AWS_CREDENTIALS_AVAILABLE == 'true'
                 }
             }
             steps {
@@ -580,7 +575,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 emailext (
                     subject: "Build ${env.BUILD_STATUS}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
                     body: emailBody,
-                    to: env.EMAIL_RECipients,
+                    to: env.EMAIL_RECIPIENTS,
                     mimeType: 'text/html'
                 )
             }
