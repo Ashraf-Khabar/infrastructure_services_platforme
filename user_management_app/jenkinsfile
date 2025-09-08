@@ -27,9 +27,6 @@ pipeline {
         ECS_CLUSTER = 'user-management-cluster'
         ECS_SERVICE = 'user-management-service'
         AWS_CREDENTIALS_ID = 'aws-credentials'
-        
-        // Variable pour suivre la disponibilité AWS
-        AWS_CREDENTIALS_AVAILABLE = 'false'
     }
 
     stages {
@@ -66,17 +63,19 @@ pipeline {
                             passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                         ]]) {
                             echo "AWS credentials found successfully"
-                            // Définir la variable d'environnement correctement
-                            env.AWS_CREDENTIALS_AVAILABLE = 'true'
+                            // Utiliser un fichier temporaire pour persister l'état
+                            sh 'echo "true" > /tmp/aws_credentials_available'
                         }
                     } catch (Exception e) {
                         echo "WARNING: AWS credentials not found with ID: ${env.AWS_CREDENTIALS_ID}"
                         echo "Please create AWS IAM user and add credentials to Jenkins"
                         echo "Skipping AWS deployment stages"
-                        env.AWS_CREDENTIALS_AVAILABLE = 'false'
+                        sh 'echo "false" > /tmp/aws_credentials_available'
                     }
                     
-                    echo "AWS_CREDENTIALS_AVAILABLE = ${env.AWS_CREDENTIALS_AVAILABLE}"
+                    // Lire et afficher la valeur pour vérification
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    echo "AWS_CREDENTIALS_AVAILABLE = ${status}"
                 }
             }
         }
@@ -305,7 +304,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Create ECR Repositories') {
             when {
                 expression { 
-                    return env.AWS_CREDENTIALS_AVAILABLE == 'true'
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${status}"
+                    return status == 'true' 
                 }
             }
             steps {
@@ -348,7 +349,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Build Docker Images') {
             when {
                 expression { 
-                    return env.AWS_CREDENTIALS_AVAILABLE == 'true'
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${status}"
+                    return status == 'true' 
                 }
             }
             steps {
@@ -376,7 +379,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Push to AWS ECR') {
             when {
                 expression { 
-                    return env.AWS_CREDENTIALS_AVAILABLE == 'true'
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${status}"
+                    return status == 'true' 
                 }
             }
             steps {
@@ -417,7 +422,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Deploy to AWS ECS') {
             when {
                 expression { 
-                    return env.AWS_CREDENTIALS_AVAILABLE == 'true'
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${status}"
+                    return status == 'true' 
                 }
             }
             steps {
@@ -465,7 +472,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         stage('Verify AWS Deployment') {
             when {
                 expression { 
-                    return env.AWS_CREDENTIALS_AVAILABLE == 'true'
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    echo "Checking AWS_CREDENTIALS_AVAILABLE: ${status}"
+                    return status == 'true' 
                 }
             }
             steps {
@@ -526,6 +535,10 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             script {
                 env.BUILD_STATUS = currentBuild.currentResult
                 
+                // Lire l'état AWS pour l'email
+                def awsStatus = sh(script: 'cat /tmp/aws_credentials_available 2>/dev/null || echo "false"', returnStdout: true).trim()
+                def awsDeploymentStatus = (awsStatus == 'true') ? 'COMPLETED' : 'SKIPPED (No AWS credentials)'
+                
                 sh """
                     echo "Cleaning up processes and resources"
                     if [ -f ${API_PID_FILE} ]; then
@@ -541,6 +554,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     docker rmi ${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} 2>/dev/null || true
                     docker rmi ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest 2>/dev/null || true
                     docker rmi ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest 2>/dev/null || true
+                    
+                    # Clean temporary file
+                    rm -f /tmp/aws_credentials_available 2>/dev/null || true
                     echo "Cleanup completed"
                 """
 
@@ -553,8 +569,6 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     statusColor = '#dc3545'
                 }
 
-                def awsDeploymentStatus = (env.AWS_CREDENTIALS_AVAILABLE == 'true') ? 'COMPLETED' : 'SKIPPED (No AWS credentials)'
-                
                 def emailTemplate = readFile(file: env.EMAIL_TEMPLATE_PATH)
 
                 def emailBody = emailTemplate
@@ -587,7 +601,10 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 echo "Build completed successfully!"
                 echo "Application deployed to:"
                 echo "- Nexus: ${env.NEXUS_URL}"
-                if (env.AWS_CREDENTIALS_AVAILABLE == 'true') {
+                
+                // Vérifier le statut AWS pour le message final
+                def awsStatus = sh(script: 'cat /tmp/aws_credentials_available 2>/dev/null || echo "false"', returnStdout: true).trim()
+                if (awsStatus == 'true') {
                     echo "- AWS ECR: ${env.AWS_ECR_REGISTRY}"
                     echo "- AWS ECS: ${env.ECS_CLUSTER}/${env.ECS_SERVICE}"
                 }
