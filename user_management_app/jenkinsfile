@@ -439,14 +439,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        sh """
-                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
-                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
-                            aws configure set region ${AWS_REGION}
-                            
-                            echo "Creating ECS Task Definition with both API and Client"
-                            
-                            cat > task-definition.json << 'EOF'
+                        // Create the task definition JSON file using writeFile instead of heredoc
+                        writeFile file: 'task-definition.json', text: """
             {
                 "family": "${ECS_TASK_DEFINITION}",
                 "networkMode": "awsvpc",
@@ -501,8 +495,15 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     }
                 ]
             }
-            EOF
-
+            """
+                        
+                        sh """
+                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region ${AWS_REGION}
+                            
+                            echo "Creating ECS Task Definition with both API and Client"
+                            
                             echo "Task definition content:"
                             cat task-definition.json
                             
@@ -510,12 +511,13 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 --cli-input-json file://task-definition.json \
                                 --region ${AWS_REGION}
                             
-                            echo "ECS Task Definition created successfully with both API and Client"
+                            echo "ECS Task Definition created successfully"
                         """
                     }
                 }
             }
         }
+
 
         stage('Create ECS Service if Needed') {
             when {
