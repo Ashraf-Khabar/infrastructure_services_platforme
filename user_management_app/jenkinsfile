@@ -539,8 +539,17 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
-                            # Check if service exists and update it with correct configuration
+                            # Check if service exists and get its status
+                            service_status=""
                             if aws ecs describe-services --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE} --region ${AWS_REGION} >/dev/null 2>&1; then
+                                service_status=\$(aws ecs describe-services --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE} --region ${AWS_REGION} --query 'services[0].status' --output text 2>/dev/null || echo "NOT_FOUND")
+                            else
+                                service_status="NOT_FOUND"
+                            fi
+                            
+                            echo "Service status: \$service_status"
+                            
+                            if [ "\$service_status" = "ACTIVE" ]; then
                                 echo "Updating existing service with correct network configuration..."
                                 
                                 aws ecs update-service \
@@ -549,7 +558,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                     --task-definition ${ECS_TASK_DEFINITION} \
                                     --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
                                     --region ${AWS_REGION}
-                            else
+                                    
+                            elif [ "\$service_status" = "NOT_FOUND" ]; then
                                 echo "Creating new ECS service..."
                                 
                                 aws ecs create-service \
@@ -560,6 +570,45 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                     --launch-type FARGATE \
                                     --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
                                     --region ${AWS_REGION}
+                                    
+                            else
+                                echo "Service exists but is not ACTIVE (status: \$service_status). Waiting and retrying..."
+                                sleep 30
+                                
+                                # Retry after waiting
+                                service_status=\$(aws ecs describe-services --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE} --region ${AWS_REGION} --query 'services[0].status' --output text 2>/dev/null || echo "NOT_FOUND")
+                                
+                                if [ "\$service_status" = "ACTIVE" ]; then
+                                    echo "Service is now ACTIVE, updating..."
+                                    aws ecs update-service \
+                                        --cluster ${ECS_CLUSTER} \
+                                        --service ${ECS_SERVICE} \
+                                        --task-definition ${ECS_TASK_DEFINITION} \
+                                        --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
+                                        --region ${AWS_REGION}
+                                else
+                                    echo "Service still not ACTIVE after waiting. Current status: \$service_status"
+                                    echo "Attempting to delete and recreate the service..."
+                                    
+                                    # Try to delete the stuck service
+                                    aws ecs delete-service \
+                                        --cluster ${ECS_CLUSTER} \
+                                        --service ${ECS_SERVICE} \
+                                        --region ${AWS_REGION} \
+                                        --force 2>/dev/null || echo "Delete failed or service already gone"
+                                        
+                                    sleep 10
+                                    
+                                    # Create new service
+                                    aws ecs create-service \
+                                        --cluster ${ECS_CLUSTER} \
+                                        --service-name ${ECS_SERVICE} \
+                                        --task-definition ${ECS_TASK_DEFINITION} \
+                                        --desired-count 1 \
+                                        --launch-type FARGATE \
+                                        --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
+                                        --region ${AWS_REGION}
+                                fi
                             fi
                             
                             sleep 10
