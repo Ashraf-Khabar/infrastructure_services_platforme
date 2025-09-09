@@ -602,28 +602,86 @@ EOF
                             aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
-                            albDns=\$(aws elbv2 describe-load-balancers --region ${AWS_REGION} --query 'LoadBalancers[?contains(LoadBalancerName, \\`user-management\\`)].DNSName' --output text 2>/dev/null || echo "NOT_FOUND")
+                            echo "=== ECS SERVICE STATUS ==="
+                            aws ecs describe-services \
+                                --cluster ${ECS_CLUSTER} \
+                                --services ${ECS_SERVICE} \
+                                --region ${AWS_REGION} \
+                                --query 'services[0].[serviceName, status, runningCount, desiredCount]' \
+                                --output table
                             
-                            if [ "\$albDns" != "NOT_FOUND" ] && [ ! -z "\$albDns" ]; then
-                                echo "Application Load Balancer DNS: \$albDns"
-                                echo "Testing application endpoints..."
-                                curl -s -f http://\${albDns}:5000/health && echo "✓ Health check passed" || echo "✗ Health check failed"
-                                curl -s http://\${albDns}:5000/ | head -n 3 || echo "✗ Main endpoint failed"
-                            else
-                                echo "ALB DNS not found. Checking ECS service directly..."
+                            echo "=== ECS TASKS ==="
+                            aws ecs list-tasks \
+                                --cluster ${ECS_CLUSTER} \
+                                --service ${ECS_SERVICE} \
+                                --region ${AWS_REGION} \
+                                --query 'taskArns' \
+                                --output table
+                            
+                            taskCount=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'length(taskArns)' --output text)
+                            
+                            if [ "\$taskCount" -eq "0" ]; then
+                                echo "No running tasks found. Attempting to start a task..."
                                 
-                                taskIp=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'taskArns[0]' --output text)
-                                if [ "\$taskIp" != "None" ]; then
-                                    echo "Task found: \$taskIp"
-                                    eniId=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$taskIp --region ${AWS_REGION} --query 'tasks[0].attachments[0].details[?name==\\`networkInterfaceId\\`].value' --output text)
-                                    if [ "\$eniId" != "None" ]; then
-                                        publicIp=\$(aws ec2 describe-network-interfaces --network-interface-ids \$eniId --region ${AWS_REGION} --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
-                                        if [ "\$publicIp" != "None" ]; then
-                                            echo "Testing service at: \$publicIp"
-                                            curl -s -f http://\${publicIp}:5000/health && echo "✓ Health check passed" || echo "✗ Health check failed"
-                                        fi
+                                aws ecs run-task \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --task-definition ${ECS_TASK_DEFINITION} \
+                                    --launch-type FARGATE \
+                                    --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
+                                    --region ${AWS_REGION} \
+                                    --query 'tasks[0].taskArn' \
+                                    --output text
+                                
+                                echo "Task started. Waiting 30 seconds for initialization..."
+                                sleep 30
+                            fi
+                            
+                            echo "=== FINDING PUBLIC IP ==="
+                            taskArn=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'taskArns[0]' --output text)
+                            
+                            if [ "\$taskArn" != "None" ]; then
+                                echo "Task ARN: \$taskArn"
+                                
+                                eniId=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$taskArn --region ${AWS_REGION} --query 'tasks[0].attachments[0].details[?name==\\`networkInterfaceId\\`].value' --output text)
+                                
+                                if [ "\$eniId" != "None" ]; then
+                                    echo "Network Interface ID: \$eniId"
+                                    
+                                    publicIp=\$(aws ec2 describe-network-interfaces --network-interface-ids \$eniId --region ${AWS_REGION} --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+                                    
+                                    if [ "\$publicIp" != "None" ]; then
+                                        echo "🎉 APPLICATION DEPLOYED SUCCESSFULLY! 🎉"
+                                        echo "========================================"
+                                        echo "🌐 API URL: http://\${publicIp}:5000"
+                                        echo "🔧 Health Check: http://\${publicIp}:5000/health"
+                                        echo "📊 API Root: http://\${publicIp}:5000/"
+                                        echo "========================================"
+                                        
+                                        echo "Testing application endpoints..."
+                                        echo "Health check:"
+                                        curl -s -f http://\${publicIp}:5000/health && echo "✅ Health check PASSED" || echo "❌ Health check FAILED"
+                                        
+                                        echo "API root:"
+                                        curl -s http://\${publicIp}:5000/ | head -n 3 || echo "❌ API root not accessible"
+                                        
+                                        echo "http://\${publicIp}:5000" > \${WORKSPACE}/app_url.txt
+                                        
+                                    else
+                                        echo "❌ No public IP found for the task"
                                     fi
+                                else
+                                    echo "❌ No network interface found for the task"
                                 fi
+                            else
+                                echo "❌ No tasks found for the service"
+                                
+                                echo "=== SERVICE EVENTS ==="
+                                aws ecs describe-services \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --services ${ECS_SERVICE} \
+                                    --region ${AWS_REGION} \
+                                    --query 'services[0].events[0:5]' \
+                                    --output table
                             fi
                         """
                     }
@@ -638,6 +696,13 @@ EOF
                 env.BUILD_STATUS = currentBuild.currentResult
                 def awsStatus = sh(script: 'cat /tmp/aws_credentials_available 2>/dev/null || echo "false"', returnStdout: true).trim()
                 def awsDeploymentStatus = (awsStatus == 'true') ? 'COMPLETED' : 'SKIPPED (No AWS credentials)'
+                
+                def appUrl = "Not available"
+                try {
+                    appUrl = readFile(file: "${WORKSPACE}/app_url.txt").trim()
+                } catch (Exception e) {
+                    appUrl = "Not available"
+                }
                 
                 sh """
                     echo "Cleaning up processes and resources"
@@ -656,6 +721,7 @@ EOF
                     
                     rm -f /tmp/aws_credentials_available 2>/dev/null || true
                     rm -f task-definition.json 2>/dev/null || true
+                    rm -f ${WORKSPACE}/app_url.txt 2>/dev/null || true
                     echo "Cleanup completed"
                 """
 
@@ -683,6 +749,7 @@ EOF
                     .replace('${AWS_REGION}', env.AWS_REGION ?: 'N/A')
                     .replace('${ECS_CLUSTER}', env.ECS_CLUSTER ?: 'N/A')
                     .replace('${AWS_DEPLOYMENT_STATUS}', awsDeploymentStatus)
+                    .replace('${APP_URL}', appUrl ?: 'Not available')
                     .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
 
                 emailext (
@@ -702,6 +769,14 @@ EOF
                 if (awsStatus == 'true') {
                     echo "- AWS ECR: ${env.AWS_ECR_REGISTRY}"
                     echo "- AWS ECS: ${env.ECS_CLUSTER}/${env.ECS_SERVICE}"
+                    
+                    try {
+                        def appUrl = readFile(file: "${WORKSPACE}/app_url.txt").trim()
+                        echo "- 🌐 Application URL: ${appUrl}"
+                        echo "- 🔧 Health Check: ${appUrl}/health"
+                    } catch (Exception e) {
+                        echo "- ❌ Application URL: Not available (check ECS service)"
+                    }
                 }
             }
         }
