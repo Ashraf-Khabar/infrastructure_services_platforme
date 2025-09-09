@@ -443,7 +443,6 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
         }
 
-
         stage('Create RDS Database') {
             when {
                 expression { 
@@ -459,18 +458,18 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        // Étape 1: Vérifier si RDS existe
+                        // Step 1: Check if RDS exists
                         sh '''
                             aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
                             aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
                             aws configure set region us-east-1
                             
-                            # Vérifier si l'instance RDS existe déjà
+                            # Check if the RDS instance already exists
                             if aws rds describe-db-instances --db-instance-identifier user-management-db --region us-east-1 >/dev/null 2>&1; then
                                 echo "RDS instance already exists"
                             else
                                 echo "Creating new RDS instance..."
-                                # Essayer de créer l'instance RDS
+                                # Try to create the RDS instance
                                 if aws rds create-db-instance \
                                     --db-instance-identifier user-management-db \
                                     --db-instance-class db.t3.micro \
@@ -493,7 +492,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             fi
                         '''
                         
-                        // Étape 2: Attendre que RDS soit disponible (seulement si créé)
+                        // Step 2: Wait for RDS to be available (only if created)
                         sh '''
                             echo "Checking if RDS instance exists and waiting if needed..."
                             if aws rds describe-db-instances --db-instance-identifier user-management-db --region us-east-1 >/dev/null 2>&1; then
@@ -502,7 +501,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                     --db-instance-identifier user-management-db \
                                     --region us-east-1
                                     
-                                # Étape 3: Récupérer l'endpoint
+                                # Step 3: Get endpoint
                                 RDS_ENDPOINT=$(aws rds describe-db-instances \
                                     --db-instance-identifier user-management-db \
                                     --query 'DBInstances[0].Endpoint.Address' \
@@ -512,19 +511,42 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 echo "RDS endpoint: $RDS_ENDPOINT"
                                 echo "postgresql://appuser:apppassword@$RDS_ENDPOINT:5432/user_management" > ${WORKSPACE}/database_url.txt
                                 
-                                # Étape 4: Tester la connexion
-                                echo "Testing database connection..."
-                                sleep 30
+                                # Step 4: Test database connection with retries
+                                echo "Testing database connection with retries..."
+                                max_retries=5
+                                retry_count=0
+                                connected=false
                                 
-                                # Essayer de se connecter
-                                if PGPASSWORD=apppassword psql -h $RDS_ENDPOINT -U appuser -d user_management -c "SELECT 1;" >/dev/null 2>&1; then
-                                    echo "✓ Database connection successful"
-                                else
-                                    echo "⚠️ Database connection failed, but continuing deployment..."
+                                while [ $retry_count -lt $max_retries ]; do
+                                    if PGPASSWORD=apppassword psql -h $RDS_ENDPOINT -U appuser -d user_management -c "SELECT 1;" >/dev/null 2>&1; then
+                                        echo "✅ Database connection successful"
+                                        connected=true
+                                        break
+                                    else
+                                        echo "⏳ Database connection failed, retrying in 30 seconds... ($((retry_count+1))/$max_retries)"
+                                        retry_count=$((retry_count+1))
+                                        sleep 30
+                                    fi
+                                done
+                                
+                                if [ "$connected" = false ]; then
+                                    echo "❌ Database connection failed after $max_retries attempts"
+                                    echo "Creating database schema manually..."
+                                    
+                                    # Try to create database and schema
+                                    PGPASSWORD=apppassword psql -h $RDS_ENDPOINT -U appuser -d postgres -c "CREATE DATABASE user_management;" 2>/dev/null || echo "Database may already exist"
+                                    
+                                    # Execute schema creation if file exists
+                                    if [ -f "${APP_DIR}/api/schema.sql" ]; then
+                                        echo "Creating database schema..."
+                                        PGPASSWORD=apppassword psql -h $RDS_ENDPOINT -U appuser -d user_management -f "${APP_DIR}/api/schema.sql" || echo "Schema creation may have failed"
+                                    else
+                                        echo "No schema.sql file found at ${APP_DIR}/api/schema.sql"
+                                    fi
                                 fi
                             else
                                 echo "Using external database configuration (RDS not created)"
-                                # Utiliser une configuration de base de données externe
+                                # Use external database configuration
                                 echo "postgresql://appuser:apppassword@external-db-host:5432/user_management" > ${WORKSPACE}/database_url.txt
                             fi
                         '''
@@ -542,7 +564,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
             steps {
                 script {
-                    // Lire l'URL de la base de données
+                    // Read database URL
                     def databaseUrl = readFile(file: "${WORKSPACE}/database_url.txt").trim()
                     
                     withCredentials([[
@@ -557,8 +579,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
     "networkMode": "awsvpc",
     "requiresCompatibilities": ["FARGATE"],
     "cpu": "1024",
-    "memory": "2048",
+    "memory": "3072",
     "executionRoleArn": "arn:aws:iam::036386574460:role/ecsTaskExecutionRole",
+    "taskRoleArn": "arn:aws:iam::036386574460:role/ecsTaskExecutionRole",
     "containerDefinitions": [
         {
             "name": "user-management-api",
@@ -579,7 +602,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 },
                 {
                     "name": "HOST",
-                    "value": "${HOST}"
+                    "value": "0.0.0.0"
                 },
                 {
                     "name": "PORT",
@@ -589,6 +612,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             "portMappings": [
                 {
                     "containerPort": 5000,
+                    "hostPort": 5000,
                     "protocol": "tcp"
                 }
             ],
@@ -603,12 +627,12 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             "healthCheck": {
                 "command": [
                     "CMD-SHELL",
-                    "sleep 30 && curl -f http://localhost:5000/health || exit 0"
+                    "curl -f http://localhost:5000/health || exit 1"
                 ],
-                "interval": 60,
-                "timeout": 10,
+                "interval": 30,
+                "timeout": 5,
                 "retries": 3,
-                "startPeriod": 120
+                "startPeriod": 60
             }
         },
         {
@@ -618,11 +642,11 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             "environment": [
                 {
                     "name": "REACT_APP_API_URL",
-                    "value": "${REACT_APP_API_URL}"
+                    "value": "http://localhost:5000"
                 },
                 {
                     "name": "HOST",
-                    "value": "${HOST}"
+                    "value": "0.0.0.0"
                 },
                 {
                     "name": "PORT",
@@ -632,6 +656,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             "portMappings": [
                 {
                     "containerPort": 3000,
+                    "hostPort": 3000,
                     "protocol": "tcp"
                 }
             ],
@@ -646,17 +671,17 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             "healthCheck": {
                 "command": [
                     "CMD-SHELL",
-                    "sleep 45 && curl -f http://localhost:3000 || exit 0"
+                    "curl -f http://localhost:3000 || exit 1"
                 ],
-                "interval": 60,
-                "timeout": 10,
+                "interval": 30,
+                "timeout": 5,
                 "retries": 3,
-                "startPeriod": 150
+                "startPeriod": 90
             },
             "dependsOn": [
                 {
                     "containerName": "user-management-api",
-                    "condition": "START"
+                    "condition": "HEALTHY"
                 }
             ]
         }
@@ -826,6 +851,71 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 --services ${ECS_SERVICE} \
                                 --region ${AWS_REGION} \
                                 --query 'services[0].deployments[0]'
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Debug Task Failures') {
+            when {
+                expression { 
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    return status == 'true' 
+                }
+            }
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'UsernamePasswordMultiBinding',
+                        credentialsId: env.AWS_CREDENTIALS_ID,
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh """
+                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region ${AWS_REGION}
+                            
+                            echo "=== CHECKING RECENT TASK FAILURES ==="
+                            
+                            # Get stopped tasks from the last hour
+                            stopped_tasks=\$(aws ecs list-tasks \
+                                --cluster user-management-cluster \
+                                --desired-status STOPPED \
+                                --region us-east-1 \
+                                --query "taskArns" \
+                                --output text)
+                            
+                            if [ ! -z "\$stopped_tasks" ]; then
+                                for task_arn in \$stopped_tasks; do
+                                    echo "--- Task: \$task_arn ---"
+                                    
+                                    # Get task details
+                                    task_info=\$(aws ecs describe-tasks \
+                                        --cluster user-management-cluster \
+                                        --tasks \$task_arn \
+                                        --region us-east-1)
+                                    
+                                    # Extract relevant information
+                                    stopped_reason=\$(echo "\$task_info" | jq -r '.tasks[0].stoppedReason')
+                                    stop_code=\$(echo "\$task_info" | jq -r '.tasks[0].stopCode')
+                                    echo "Stop Code: \$stop_code"
+                                    echo "Stopped Reason: \$stopped_reason"
+                                    
+                                    # Container information
+                                    echo "Containers:"
+                                    echo "\$task_info" | jq -r '.tasks[0].containers[] | "  \(.name): \(.lastStatus), Exit: \(.exitCode), Reason: \(.reason)"'
+                                    
+                                    # Network information
+                                    echo "Network:"
+                                    echo "\$task_info" | jq -r '.tasks[0].attachments[0].details[] | "  \(.name): \(.value)"'
+                                    
+                                    echo ""
+                                done
+                            else
+                                echo "No recently stopped tasks found"
+                            fi
                         """
                     }
                 }
