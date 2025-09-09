@@ -697,6 +697,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 --query 'services[0].[serviceName, status, runningCount, desiredCount]' \
                                 --output table
                             
+                            echo "=== Waiting for tasks to stabilize (60 seconds) ==="
+                            sleep 60
+                            
                             echo "=== ECS TASKS ==="
                             aws ecs list-tasks \
                                 --cluster ${ECS_CLUSTER} \
@@ -708,7 +711,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             taskCount=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'length(taskArns)' --output text)
                             
                             if [ "\$taskCount" -eq "0" ]; then
-                                echo "No running tasks found. Checking stopped tasks for errors..."
+                                echo "❌ No running tasks found. Checking stopped tasks for errors..."
                                 
                                 # Check stopped tasks to understand why they failed
                                 stopped_tasks=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --desired-status STOPPED --region ${AWS_REGION} --query 'taskArns' --output text 2>/dev/null || echo "")
@@ -720,76 +723,95 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                         stopped_reason=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$task_arn --region ${AWS_REGION} --query 'tasks[0].stoppedReason' --output text)
                                         echo "Stopped Reason: \$stopped_reason"
                                         
-                                        # Get container exit codes
-                                        containers=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$task_arn --region ${AWS_REGION} --query 'tasks[0].containers[].[name, exitCode]' --output text)
-                                        echo "Container Exit Codes:"
+                                        # Get container exit codes and last status
+                                        containers=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$task_arn --region ${AWS_REGION} --query 'tasks[0].containers[].[name, lastStatus, exitCode, reason]' --output text)
+                                        echo "Containers Status:"
                                         echo "\$containers"
+                                        
+                                        # Get logs from CloudWatch for debugging
+                                        echo "=== CLOUDWATCH LOGS INFO ==="
+                                        aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$task_arn --region ${AWS_REGION} --query 'tasks[0].containers[].[name, logStreamName]' --output table
                                     done
-                                else
-                                    echo "No stopped tasks found either. Service may still be provisioning."
                                 fi
                                 
                             else
-                                echo "=== FINDING PUBLIC IP ==="
+                                echo "=== FINDING PUBLIC IP AND URLs ==="
                                 taskArn=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'taskArns[0]' --output text)
                                 
                                 if [ "\$taskArn" != "None" ]; then
                                     echo "Task ARN: \$taskArn"
+                                    
+                                    # Wait for task to be running and get network interface
+                                    echo "Waiting for network interface to be assigned..."
+                                    sleep 30
                                     
                                     # Get task details and extract network interface using jq
                                     taskDetails=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$taskArn --region ${AWS_REGION} --output json)
                                     eniId=\$(echo "\$taskDetails" | jq -r '.tasks[0].attachments[0].details[] | select(.name == "networkInterfaceId") | .value')
                                     
                                     if [ ! -z "\$eniId" ] && [ "\$eniId" != "null" ]; then
-                                        echo "Network Interface ID: \$eniId"
+                                        echo "✅ Network Interface ID: \$eniId"
                                         
                                         publicIp=\$(aws ec2 describe-network-interfaces --network-interface-ids \$eniId --region ${AWS_REGION} --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
                                         
                                         if [ "\$publicIp" != "None" ] && [ ! -z "\$publicIp" ]; then
-                                            echo " APPLICATION DEPLOYED SUCCESSFULLY! 🎉"
+                                            echo "🎉 APPLICATION DEPLOYED SUCCESSFULLY!"
                                             echo "========================================"
-                                            echo " API URL: http://\${publicIp}:5000"
-                                            echo " API Health Check: http://\${publicIp}:5000/health"
-                                            echo " Client URL: http://\${publicIp}:3000"
+                                            echo "🌐 API URL: http://\${publicIp}:5000"
+                                            echo "🩺 API Health Check: http://\${publicIp}:5000/health"
+                                            echo "💻 Client URL: http://\${publicIp}:3000"
+                                            echo "📊 Client Health: http://\${publicIp}:3000/health"
                                             echo "========================================"
                                             
-                                            echo "Testing application endpoints..."
-                                            echo "API Health check:"
-                                            curl -s -f http://\${publicIp}:5000/health && echo " API Health check PASSED" || echo " API Health check FAILED"
-                                        
-                                            echo "Client check:"
-                                            curl -s -f http://\${publicIp}:3000 && echo " Client check PASSED" || echo " Client check FAILED"
-                                            
+                                            # Save URLs to files for email notification
                                             echo "http://\${publicIp}:3000" > \${WORKSPACE}/app_url.txt
                                             echo "http://\${publicIp}:5000" > \${WORKSPACE}/api_url.txt
+                                            echo "\${publicIp}" > \${WORKSPACE}/public_ip.txt
+                                            
+                                            echo "Testing application endpoints (waiting 10 seconds for apps to start)..."
+                                            sleep 10
+                                            
+                                            echo "Testing API Health check:"
+                                            curl -s -f --connect-timeout 10 http://\${publicIp}:5000/health && echo "✅ API Health check PASSED" || echo "❌ API Health check FAILED"
+                                        
+                                            echo "Testing Client:"
+                                            curl -s -f --connect-timeout 10 http://\${publicIp}:3000 && echo "✅ Client check PASSED" || echo "❌ Client check FAILED"
                                             
                                         else
-                                            echo " No public IP found for the task"
+                                            echo "❌ No public IP found for the task"
                                             echo "Task details for debugging:"
                                             echo "\$taskDetails" | jq .
                                         fi
                                     else
-                                        echo " No network interface found for the task"
-                                        echo "Task details for debugging:"
-                                        echo "\$taskDetails" | jq .
+                                        echo "❌ No network interface found for the task"
+                                        echo "Task status:"
+                                        echo "\$taskDetails" | jq '.tasks[0].containers[] | {name: .name, status: .lastStatus, reason: .reason}'
                                     fi
                                 else
-                                    echo " No tasks found for the service"
+                                    echo "❌ No tasks found for the service"
                                 fi
                             fi
                             
-                            echo "=== SERVICE EVENTS (last 5) ==="
+                            echo "=== SERVICE EVENTS (last 10) ==="
                             aws ecs describe-services \
                                 --cluster ${ECS_CLUSTER} \
                                 --services ${ECS_SERVICE} \
                                 --region ${AWS_REGION} \
-                                --query 'services[0].events[0:5]' \
+                                --query 'services[0].events[0:10]' \
+                                --output table
+                                
+                            echo "=== TASK STATUS SUMMARY ==="
+                            aws ecs describe-tasks \
+                                --cluster ${ECS_CLUSTER} \
+                                --tasks \$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'taskArns' --output text) \
+                                --region ${AWS_REGION} \
+                                --query 'tasks[].containers[].[name, lastStatus, reason]' \
                                 --output table
                         """
                     }
                 }
             }
-        }
+}
     }
 
     post {

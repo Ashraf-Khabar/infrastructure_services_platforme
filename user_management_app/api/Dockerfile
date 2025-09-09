@@ -14,5 +14,6 @@ COPY . .
 
 EXPOSE 5000
 
-# Use gunicorn to run the Flask app
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app", "--timeout", "120"]
+# Use gunicorn to run the Flask app - FIXED COMMAND
+# Make sure your Flask app instance is named 'app' in app.py
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app", "--timeout", "120", "--access-logfile", "-"]
