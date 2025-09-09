@@ -446,38 +446,41 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             
                             echo "Creating ECS Task Definition"
                             
-                            cat > task-definition.json << EOF
-{
-    "family": "${ECS_TASK_DEFINITION}",
-    "networkMode": "awsvpc",
-    "requiresCompatibilities": ["FARGATE"],
-    "cpu": "256",
-    "memory": "512",
-    "executionRoleArn": "arn:aws:iam::036386574460:role/ecsTaskExecutionRole",
-    "containerDefinitions": [
+                            cat > task-definition.json << 'EOF'
         {
-            "name": "user-management-api",
-            "image": "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest",
-            "essential": true,
-            "portMappings": [
+            "family": "${ECS_TASK_DEFINITION}",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "256",
+            "memory": "512",
+            "executionRoleArn": "arn:aws:iam::036386574460:role/ecsTaskExecutionRole",
+            "containerDefinitions": [
                 {
-                    "containerPort": 5000,
-                    "protocol": "tcp"
+                    "name": "user-management-api",
+                    "image": "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest",
+                    "essential": true,
+                    "portMappings": [
+                        {
+                            "containerPort": 5000,
+                            "protocol": "tcp"
+                        }
+                    ],
+                    "logConfiguration": {
+                        "logDriver": "awslogs",
+                        "options": {
+                            "awslogs-group": "/ecs/user-management",
+                            "awslogs-region": "${AWS_REGION}",
+                            "awslogs-stream-prefix": "ecs"
+                        }
+                    }
                 }
-            ],
-            "logConfiguration": {
-                "logDriver": "awslogs",
-                "options": {
-                    "awslogs-group": "/ecs/user-management",
-                    "awslogs-region": "${AWS_REGION},
-                    "awslogs-stream-prefix": "ecs"
-                }
-            }
+            ]
         }
-    ]
-}
-EOF
+        EOF
 
+                            echo "Task definition content:"
+                            cat task-definition.json
+                            
                             aws ecs register-task-definition \
                                 --cli-input-json file://task-definition.json \
                                 --region ${AWS_REGION}
