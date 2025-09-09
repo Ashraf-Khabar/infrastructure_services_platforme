@@ -2,18 +2,17 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# Install system dependencies and gunicorn
-RUN apt-get update && apt-get install -y \
-    gunicorn \
-    && rm -rf /var/lib/apt/lists/*
-
+# Copy requirements first to leverage Docker cache
 COPY requirements.txt .
+
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy application code
 COPY . .
 
+# Expose the port
 EXPOSE 5000
 
-# Use gunicorn to run the Flask app - FIXED COMMAND
-# Make sure your Flask app instance is named 'app' in app.py
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app", "--timeout", "120", "--access-logfile", "-"]
+# Command to run the application
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]

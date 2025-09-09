@@ -392,9 +392,17 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             steps {
                 script {
                     echo "Building Docker images for AWS ECR"
+                    
+                    // First, verify the requirements.txt exists and has content
+                    sh """
+                        echo "=== API REQUIREMENTS ==="
+                        cat ${APP_DIR}/api/requirements.txt || echo "No requirements.txt found"
+                        echo "========================"
+                    """
+                    
                     sh """
                         cd ${APP_DIR}/api
-                        docker build -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} .
+                        docker build --no-cache -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} .
                         docker tag ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
                     """
                     sh """
