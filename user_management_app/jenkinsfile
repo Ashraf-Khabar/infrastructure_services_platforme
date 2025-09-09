@@ -872,51 +872,51 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        sh """
-                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
-                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
-                            aws configure set region ${AWS_REGION}
+                        sh '''
+                            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region us-east-1
                             
                             echo "=== CHECKING RECENT TASK FAILURES ==="
                             
                             # Get stopped tasks from the last hour
-                            stopped_tasks=\$(aws ecs list-tasks \
+                            stopped_tasks=$(aws ecs list-tasks \
                                 --cluster user-management-cluster \
                                 --desired-status STOPPED \
                                 --region us-east-1 \
                                 --query "taskArns" \
                                 --output text)
                             
-                            if [ ! -z "\$stopped_tasks" ]; then
-                                for task_arn in \$stopped_tasks; do
-                                    echo "--- Task: \$task_arn ---"
+                            if [ ! -z "$stopped_tasks" ]; then
+                                for task_arn in $stopped_tasks; do
+                                    echo "--- Task: $task_arn ---"
                                     
                                     # Get task details
-                                    task_info=\$(aws ecs describe-tasks \
+                                    task_info=$(aws ecs describe-tasks \
                                         --cluster user-management-cluster \
-                                        --tasks \$task_arn \
+                                        --tasks $task_arn \
                                         --region us-east-1)
                                     
                                     # Extract relevant information
-                                    stopped_reason=\$(echo "\$task_info" | jq -r '.tasks[0].stoppedReason')
-                                    stop_code=\$(echo "\$task_info" | jq -r '.tasks[0].stopCode')
-                                    echo "Stop Code: \$stop_code"
-                                    echo "Stopped Reason: \$stopped_reason"
+                                    stopped_reason=$(echo "$task_info" | jq -r '.tasks[0].stoppedReason')
+                                    stop_code=$(echo "$task_info" | jq -r '.tasks[0].stopCode')
+                                    echo "Stop Code: $stop_code"
+                                    echo "Stopped Reason: $stopped_reason"
                                     
                                     # Container information
                                     echo "Containers:"
-                                    echo "\$task_info" | jq -r '.tasks[0].containers[] | "  \(.name): \(.lastStatus), Exit: \(.exitCode), Reason: \(.reason)"'
+                                    echo "$task_info" | jq -r '.tasks[0].containers[] | "  \\(.name): \\(.lastStatus), Exit: \\(.exitCode), Reason: \\(.reason)"'
                                     
                                     # Network information
                                     echo "Network:"
-                                    echo "\$task_info" | jq -r '.tasks[0].attachments[0].details[] | "  \(.name): \(.value)"'
+                                    echo "$task_info" | jq -r '.tasks[0].attachments[0].details[] | "  \\(.name): \\(.value)"'
                                     
                                     echo ""
                                 done
                             else
                                 echo "No recently stopped tasks found"
                             fi
-                        """
+                        '''
                     }
                 }
             }
