@@ -31,6 +31,15 @@ pipeline {
         
         SUBNET_IDS = 'subnet-07c7753f7a3e568fe,subnet-0855ecf8e69a20c39,subnet-0e49091aac1b8dc12'
         SECURITY_GROUP_ID = 'sg-0d0b46466c78a871e'
+        
+        // Database and Application Environment Variables
+        DATABASE_URL = 'postgresql://username:password@your-rds-endpoint:5432/user_management_db'
+        FLASK_ENV = 'production'
+        FLASK_DEBUG = '0'
+        REACT_APP_API_URL = 'http://localhost:5000'
+        HOST = '0.0.0.0'
+        PORT = '5000'
+        CLIENT_PORT = '3000'
     }
 
     stages {
@@ -424,7 +433,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
         }
 
-        stage('Create ECS Task Definition') {
+        stage('Create ECS Task Definition with Environment Variables') {
             when {
                 expression { 
                     def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
@@ -439,70 +448,126 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        // Create the task definition JSON file using writeFile instead of heredoc
+                        // Create the task definition JSON file with environment variables
                         writeFile file: 'task-definition.json', text: """
-            {
-                "family": "${ECS_TASK_DEFINITION}",
-                "networkMode": "awsvpc",
-                "requiresCompatibilities": ["FARGATE"],
-                "cpu": "512",
-                "memory": "1024",
-                "executionRoleArn": "arn:aws:iam::036386574460:role/ecsTaskExecutionRole",
-                "containerDefinitions": [
-                    {
-                        "name": "user-management-api",
-                        "image": "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest",
-                        "essential": true,
-                        "portMappings": [
-                            {
-                                "containerPort": 5000,
-                                "protocol": "tcp"
-                            }
-                        ],
-                        "logConfiguration": {
-                            "logDriver": "awslogs",
-                            "options": {
-                                "awslogs-group": "/ecs/user-management",
-                                "awslogs-region": "${AWS_REGION}",
-                                "awslogs-stream-prefix": "api"
-                            }
-                        }
-                    },
-                    {
-                        "name": "user-management-client",
-                        "image": "${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest",
-                        "essential": true,
-                        "portMappings": [
-                            {
-                                "containerPort": 3000,
-                                "protocol": "tcp"
-                            }
-                        ],
-                        "logConfiguration": {
-                            "logDriver": "awslogs",
-                            "options": {
-                                "awslogs-group": "/ecs/user-management",
-                                "awslogs-region": "${AWS_REGION}",
-                                "awslogs-stream-prefix": "client"
-                            }
-                        },
-                        "dependsOn": [
-                            {
-                                "containerName": "user-management-api",
-                                "condition": "START"
-                            }
-                        ]
-                    }
-                ]
+{
+    "family": "${ECS_TASK_DEFINITION}",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "1024",
+    "memory": "2048",
+    "executionRoleArn": "arn:aws:iam::036386574460:role/ecsTaskExecutionRole",
+    "containerDefinitions": [
+        {
+            "name": "user-management-api",
+            "image": "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest",
+            "essential": true,
+            "environment": [
+                {
+                    "name": "DATABASE_URL",
+                    "value": "${DATABASE_URL}"
+                },
+                {
+                    "name": "FLASK_ENV",
+                    "value": "${FLASK_ENV}"
+                },
+                {
+                    "name": "FLASK_DEBUG",
+                    "value": "${FLASK_DEBUG}"
+                },
+                {
+                    "name": "HOST",
+                    "value": "${HOST}"
+                },
+                {
+                    "name": "PORT",
+                    "value": "${PORT}"
+                }
+            ],
+            "portMappings": [
+                {
+                    "containerPort": 5000,
+                    "protocol": "tcp"
+                }
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/user-management",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "api"
+                }
+            },
+            "healthCheck": {
+                "command": [
+                    "CMD-SHELL",
+                    "curl -f http://localhost:5000/health || exit 1"
+                ],
+                "interval": 30,
+                "timeout": 5,
+                "retries": 3,
+                "startPeriod": 60
             }
-            """
+        },
+        {
+            "name": "user-management-client",
+            "image": "${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest",
+            "essential": true,
+            "environment": [
+                {
+                    "name": "REACT_APP_API_URL",
+                    "value": "${REACT_APP_API_URL}"
+                },
+                {
+                    "name": "HOST",
+                    "value": "${HOST}"
+                },
+                {
+                    "name": "PORT",
+                    "value": "${CLIENT_PORT}"
+                }
+            ],
+            "portMappings": [
+                {
+                    "containerPort": 3000,
+                    "protocol": "tcp"
+                }
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/user-management",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "client"
+                }
+            },
+            "healthCheck": {
+                "command": [
+                    "CMD-SHELL",
+                    "curl -f http://localhost:3000 || exit 1"
+                ],
+                "interval": 30,
+                "timeout": 5,
+                "retries": 3,
+                "startPeriod": 90
+            },
+            "dependsOn": [
+                {
+                    "containerName": "user-management-api",
+                    "condition": "START"
+                }
+            ]
+        }
+    ]
+}
+"""
                         
                         sh """
                             aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
                             aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
-                            echo "Creating ECS Task Definition with both API and Client"
+                            echo "Creating ECS Task Definition with environment variables"
                             
                             echo "Task definition content:"
                             cat task-definition.json
@@ -511,13 +576,12 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 --cli-input-json file://task-definition.json \
                                 --region ${AWS_REGION}
                             
-                            echo "ECS Task Definition created successfully"
+                            echo "ECS Task Definition created successfully with environment variables"
                         """
                     }
                 }
             }
         }
-
 
         stage('Create ECS Service if Needed') {
             when {
@@ -697,8 +761,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 --query 'services[0].[serviceName, status, runningCount, desiredCount]' \
                                 --output table
                             
-                            echo "=== Waiting for tasks to stabilize (60 seconds) ==="
-                            sleep 60
+                            echo "=== Waiting for tasks to stabilize (90 seconds) ==="
+                            sleep 90
                             
                             echo "=== ECS TASKS ==="
                             aws ecs list-tasks \
@@ -768,8 +832,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                             echo "http://\${publicIp}:5000" > \${WORKSPACE}/api_url.txt
                                             echo "\${publicIp}" > \${WORKSPACE}/public_ip.txt
                                             
-                                            echo "Testing application endpoints (waiting 10 seconds for apps to start)..."
-                                            sleep 10
+                                            echo "Testing application endpoints (waiting 15 seconds for apps to start)..."
+                                            sleep 15
                                             
                                             echo "Testing API Health check:"
                                             curl -s -f --connect-timeout 10 http://\${publicIp}:5000/health && echo "✅ API Health check PASSED" || echo "❌ API Health check FAILED"
@@ -811,7 +875,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     }
                 }
             }
-}
+        }
     }
 
     post {
