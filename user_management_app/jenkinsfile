@@ -168,7 +168,7 @@ pipeline {
                     steps {
                         script {
                             sh """
-                                mkdir -p ${ROBOT_REPORTS_DIR}
+                                mkdir -p ${ROBOT_REPORts_DIR}
                                 cd ${APP_DIR}/robot_tests
                                 set +e
                                 ${VENV_PATH}/bin/robot \
@@ -642,7 +642,8 @@ EOF
                             if [ "\$taskArn" != "None" ]; then
                                 echo "Task ARN: \$taskArn"
                                 
-                                eniId=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$taskArn --region ${AWS_REGION} --query 'tasks[0].attachments[0].details[?name==\\`networkInterfaceId\\`].value' --output text)
+                                # CORRECTION JMESPATH ICI : Supprimer le double backslash
+                                eniId=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$taskArn --region ${AWS_REGION} --query 'tasks[0].attachments[0].details[?name==\`networkInterfaceId\`].value' --output text)
                                 
                                 if [ "\$eniId" != "None" ]; then
                                     echo "Network Interface ID: \$eniId"
@@ -650,30 +651,30 @@ EOF
                                     publicIp=\$(aws ec2 describe-network-interfaces --network-interface-ids \$eniId --region ${AWS_REGION} --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
                                     
                                     if [ "\$publicIp" != "None" ]; then
-                                        echo "🎉 APPLICATION DEPLOYED SUCCESSFULLY! 🎉"
+                                        echo " APPLICATION DEPLOYED SUCCESSFULLY! 🎉"
                                         echo "========================================"
-                                        echo "🌐 API URL: http://\${publicIp}:5000"
-                                        echo "🔧 Health Check: http://\${publicIp}:5000/health"
-                                        echo "📊 API Root: http://\${publicIp}:5000/"
+                                        echo " API URL: http://\${publicIp}:5000"
+                                        echo " Health Check: http://\${publicIp}:5000/health"
+                                        echo " API Root: http://\${publicIp}:5000/"
                                         echo "========================================"
                                         
                                         echo "Testing application endpoints..."
                                         echo "Health check:"
-                                        curl -s -f http://\${publicIp}:5000/health && echo "✅ Health check PASSED" || echo "❌ Health check FAILED"
-                                        
+                                        curl -s -f http://\${publicIp}:5000/health && echo " Health check PASSED" || echo " Health check FAILED"
+                                    
                                         echo "API root:"
-                                        curl -s http://\${publicIp}:5000/ | head -n 3 || echo "❌ API root not accessible"
+                                        curl -s http://\${publicIp}:5000/ | head -n 3 || echo " API root not accessible"
                                         
                                         echo "http://\${publicIp}:5000" > \${WORKSPACE}/app_url.txt
                                         
                                     else
-                                        echo "❌ No public IP found for the task"
+                                        echo " No public IP found for the task"
                                     fi
                                 else
-                                    echo "❌ No network interface found for the task"
+                                    echo " No network interface found for the task"
                                 fi
                             else
-                                echo "❌ No tasks found for the service"
+                                echo " No tasks found for the service"
                                 
                                 echo "=== SERVICE EVENTS ==="
                                 aws ecs describe-services \
@@ -772,10 +773,10 @@ EOF
                     
                     try {
                         def appUrl = readFile(file: "${WORKSPACE}/app_url.txt").trim()
-                        echo "- 🌐 Application URL: ${appUrl}"
-                        echo "- 🔧 Health Check: ${appUrl}/health"
+                        echo "-  Application URL: ${appUrl}"
+                        echo "-  Health Check: ${appUrl}/health"
                     } catch (Exception e) {
-                        echo "- ❌ Application URL: Not available (check ECS service)"
+                        echo "-  Application URL: Not available (check ECS service)"
                     }
                 }
             }
