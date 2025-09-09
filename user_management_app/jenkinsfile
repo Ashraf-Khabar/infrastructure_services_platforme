@@ -38,7 +38,7 @@ pipeline {
             steps {
                 sh '''
                     sudo apt update -y
-                    sudo apt install -y python3 python3-pip python3-venv curl docker.io
+                    sudo apt install -y python3 python3-pip python3-venv curl docker.io jq
                     python3 -m venv ${VENV_PATH}
                     ${VENV_PATH}/bin/pip install --upgrade pip
                     
@@ -47,6 +47,7 @@ pipeline {
                     echo "Pip: $(${VENV_PATH}/bin/pip --version)"
                     echo "AWS CLI: $(aws --version 2>&1)"
                     echo "Docker: $(docker --version)"
+                    echo "jq: $(jq --version)"
                     echo "==========================="
                 '''
             }
@@ -168,7 +169,7 @@ pipeline {
                     steps {
                         script {
                             sh """
-                                mkdir -p ${ROBOT_REPORts_DIR}
+                                mkdir -p ${ROBOT_REPORTS_DIR}
                                 cd ${APP_DIR}/robot_tests
                                 set +e
                                 ${VENV_PATH}/bin/robot \
@@ -468,7 +469,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 "logDriver": "awslogs",
                 "options": {
                     "awslogs-group": "/ecs/user-management",
-                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-region": "${AWS_REGION},
                     "awslogs-stream-prefix": "ecs"
                 }
             }
@@ -508,8 +509,18 @@ EOF
                             aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
-                            if ! aws ecs describe-services --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE} --region ${AWS_REGION} >/dev/null 2>&1; then
-                                echo "Service ${ECS_SERVICE} does not exist. Creating it..."
+                            # Check if service exists and update it with correct configuration
+                            if aws ecs describe-services --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE} --region ${AWS_REGION} >/dev/null 2>&1; then
+                                echo "Updating existing service with correct network configuration..."
+                                
+                                aws ecs update-service \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --service ${ECS_SERVICE} \
+                                    --task-definition ${ECS_TASK_DEFINITION} \
+                                    --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
+                                    --region ${AWS_REGION}
+                            else
+                                echo "Creating new ECS service..."
                                 
                                 aws ecs create-service \
                                     --cluster ${ECS_CLUSTER} \
@@ -519,12 +530,9 @@ EOF
                                     --launch-type FARGATE \
                                     --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
                                     --region ${AWS_REGION}
-                                
-                                echo "ECS service created: ${ECS_SERVICE}"
-                                sleep 30
-                            else
-                                echo "ECS service already exists: ${ECS_SERVICE}"
                             fi
+                            
+                            sleep 10
                         """
                     }
                 }
@@ -582,116 +590,118 @@ EOF
             }
         }
 
-    
         stage('Verify AWS Deployment') {
-    when {
-        expression { 
-            def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
-            return status == 'true' 
-        }
-    }
-    steps {
-        script {
-            withCredentials([[
-                $class: 'UsernamePasswordMultiBinding',
-                credentialsId: env.AWS_CREDENTIALS_ID,
-                usernameVariable: 'AWS_ACCESS_KEY_ID',
-                passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-            ]]) {
-                sh """
-                    aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
-                    aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
-                    aws configure set region ${AWS_REGION}
-                    
-                    echo "=== ECS SERVICE STATUS ==="
-                    aws ecs describe-services \
-                        --cluster ${ECS_CLUSTER} \
-                        --services ${ECS_SERVICE} \
-                        --region ${AWS_REGION} \
-                        --query 'services[0].[serviceName, status, runningCount, desiredCount]' \
-                        --output table
-                    
-                    echo "=== ECS TASKS ==="
-                    aws ecs list-tasks \
-                        --cluster ${ECS_CLUSTER} \
-                        --service ${ECS_SERVICE} \
-                        --region ${AWS_REGION} \
-                        --query 'taskArns' \
-                        --output table
-                    
-                    taskCount=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'length(taskArns)' --output text)
-                    
-                    if [ "\$taskCount" -eq "0" ]; then
-                        echo "No running tasks found. Attempting to start a task..."
-                        
-                        aws ecs run-task \
-                            --cluster ${ECS_CLUSTER} \
-                            --task-definition ${ECS_TASK_DEFINITION} \
-                            --launch-type FARGATE \
-                            --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
-                            --region ${AWS_REGION} \
-                            --query 'tasks[0].taskArn' \
-                            --output text
-                        
-                        echo "Task started. Waiting 30 seconds for initialization..."
-                        sleep 30
-                    fi
-                    
-                    echo "=== FINDING PUBLIC IP ==="
-                    taskArn=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'taskArns[0]' --output text)
-                    
-                    if [ "\$taskArn" != "None" ]; then
-                        echo "Task ARN: \$taskArn"
-                        
-                        # CORRECTED JMESPATH QUERY - using double quotes and single quotes
-                        eniId=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$taskArn --region ${AWS_REGION} --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value" --output text)
-                        
-                        if [ "\$eniId" != "None" ]; then
-                            echo "Network Interface ID: \$eniId"
+            when {
+                expression { 
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    return status == 'true' 
+                }
+            }
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'UsernamePasswordMultiBinding',
+                        credentialsId: env.AWS_CREDENTIALS_ID,
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh """
+                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region ${AWS_REGION}
                             
-                            publicIp=\$(aws ec2 describe-network-interfaces --network-interface-ids \$eniId --region ${AWS_REGION} --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+                            echo "=== ECS SERVICE STATUS ==="
+                            aws ecs describe-services \
+                                --cluster ${ECS_CLUSTER} \
+                                --services ${ECS_SERVICE} \
+                                --region ${AWS_REGION} \
+                                --query 'services[0].[serviceName, status, runningCount, desiredCount]' \
+                                --output table
                             
-                            if [ "\$publicIp" != "None" ]; then
-                                echo " APPLICATION DEPLOYED SUCCESSFULLY! 🎉"
-                                echo "========================================"
-                                echo " API URL: http://\${publicIp}:5000"
-                                echo " Health Check: http://\${publicIp}:5000/health"
-                                echo " API Root: http://\${publicIp}:5000/"
-                                echo "========================================"
-                                
-                                echo "Testing application endpoints..."
-                                echo "Health check:"
-                                curl -s -f http://\${publicIp}:5000/health && echo " Health check PASSED" || echo " Health check FAILED"
+                            echo "=== ECS TASKS ==="
+                            aws ecs list-tasks \
+                                --cluster ${ECS_CLUSTER} \
+                                --service ${ECS_SERVICE} \
+                                --region ${AWS_REGION} \
+                                --query 'taskArns' \
+                                --output table
                             
-                                echo "API root:"
-                                curl -s http://\${publicIp}:5000/ | head -n 3 || echo " API root not accessible"
+                            taskCount=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'length(taskArns)' --output text)
+                            
+                            if [ "\$taskCount" -eq "0" ]; then
+                                echo "No running tasks found. Attempting to start a task..."
                                 
-                                echo "http://\${publicIp}:5000" > \${WORKSPACE}/app_url.txt
+                                aws ecs run-task \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --task-definition ${ECS_TASK_DEFINITION} \
+                                    --launch-type FARGATE \
+                                    --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
+                                    --region ${AWS_REGION} \
+                                    --query 'tasks[0].taskArn' \
+                                    --output text
                                 
-                            else
-                                echo " No public IP found for the task"
+                                echo "Task started. Waiting 30 seconds for initialization..."
+                                sleep 30
                             fi
-                        else
-                            echo " No network interface found for the task"
-                        fi
-                    else
-                        echo " No tasks found for the service"
-                        
-                        echo "=== SERVICE EVENTS ==="
-                        aws ecs describe-services \
-                            --cluster ${ECS_CLUSTER} \
-                            --services ${ECS_SERVICE} \
-                            --region ${AWS_REGION} \
-                            --query 'services[0].events[0:5]' \
-                            --output table
-                    fi
-                """
+                            
+                            echo "=== FINDING PUBLIC IP ==="
+                            taskArn=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'taskArns[0]' --output text)
+                            
+                            if [ "\$taskArn" != "None" ]; then
+                                echo "Task ARN: \$taskArn"
+                                
+                                # Get task details and extract network interface using jq
+                                taskDetails=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$taskArn --region ${AWS_REGION} --output json)
+                                eniId=\$(echo "\$taskDetails" | jq -r '.tasks[0].attachments[0].details[] | select(.name == "networkInterfaceId") | .value')
+                                
+                                if [ ! -z "\$eniId" ] && [ "\$eniId" != "null" ]; then
+                                    echo "Network Interface ID: \$eniId"
+                                    
+                                    publicIp=\$(aws ec2 describe-network-interfaces --network-interface-ids \$eniId --region ${AWS_REGION} --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+                                    
+                                    if [ "\$publicIp" != "None" ] && [ ! -z "\$publicIp" ]; then
+                                        echo " APPLICATION DEPLOYED SUCCESSFULLY! 🎉"
+                                        echo "========================================"
+                                        echo " API URL: http://\${publicIp}:5000"
+                                        echo " Health Check: http://\${publicIp}:5000/health"
+                                        echo " API Root: http://\${publicIp}:5000/"
+                                        echo "========================================"
+                                        
+                                        echo "Testing application endpoints..."
+                                        echo "Health check:"
+                                        curl -s -f http://\${publicIp}:5000/health && echo " Health check PASSED" || echo " Health check FAILED"
+                                    
+                                        echo "API root:"
+                                        curl -s http://\${publicIp}:5000/ | head -n 3 || echo " API root not accessible"
+                                        
+                                        echo "http://\${publicIp}:5000" > \${WORKSPACE}/app_url.txt
+                                        
+                                    else
+                                        echo " No public IP found for the task"
+                                        echo "Task details for debugging:"
+                                        echo "\$taskDetails" | jq .
+                                    fi
+                                else
+                                    echo " No network interface found for the task"
+                                    echo "Task details for debugging:"
+                                    echo "\$taskDetails" | jq .
+                                fi
+                            else
+                                echo " No tasks found for the service"
+                                
+                                echo "=== SERVICE EVENTS ==="
+                                aws ecs describe-services \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --services ${ECS_SERVICE} \
+                                    --region ${AWS_REGION} \
+                                    --query 'services[0].events[0:5]' \
+                                    --output table
+                            fi
+                        """
+                    }
+                }
             }
         }
-    }
-}
-
-
     }
 
     post {
