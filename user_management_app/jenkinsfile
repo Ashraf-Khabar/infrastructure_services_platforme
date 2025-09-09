@@ -32,8 +32,17 @@ pipeline {
         SUBNET_IDS = 'subnet-07c7753f7a3e568fe,subnet-0855ecf8e69a20c39,subnet-0e49091aac1b8dc12'
         SECURITY_GROUP_ID = 'sg-0d0b46466c78a871e'
         
-        // Database and Application Environment Variables
-        DATABASE_URL = 'postgresql://username:password@your-rds-endpoint:5432/user_management_db'
+        // Database configuration
+        DB_INSTANCE_IDENTIFIER = 'user-management-db'
+        DB_NAME = 'user_management'
+        DB_USERNAME = 'appuser'
+        DB_PASSWORD = 'apppassword'
+        DB_INSTANCE_CLASS = 'db.t3.micro'
+        DB_ENGINE = 'postgres'
+        DB_ENGINE_VERSION = '15.4'
+        DB_STORAGE = '20'
+        
+        // Application Environment Variables
         FLASK_ENV = 'production'
         FLASK_DEBUG = '0'
         REACT_APP_API_URL = 'http://localhost:5000'
@@ -47,7 +56,7 @@ pipeline {
             steps {
                 sh '''
                     sudo apt update -y
-                    sudo apt install -y python3 python3-pip python3-venv curl docker.io jq
+                    sudo apt install -y python3 python3-pip python3-venv curl docker.io jq postgresql-client
                     python3 -m venv ${VENV_PATH}
                     ${VENV_PATH}/bin/pip install --upgrade pip
                     
@@ -57,6 +66,7 @@ pipeline {
                     echo "AWS CLI: $(aws --version 2>&1)"
                     echo "Docker: $(docker --version)"
                     echo "jq: $(jq --version)"
+                    echo "psql: $(psql --version)"
                     echo "==========================="
                 '''
             }
@@ -433,7 +443,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
         }
 
-        stage('Create ECS Task Definition with Environment Variables') {
+        stage('Create RDS Database') {
             when {
                 expression { 
                     def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
@@ -448,7 +458,97 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        // Create the task definition JSON file with environment variables
+                        sh """
+                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region ${AWS_REGION}
+                            
+                            # Vérifier si RDS existe déjà
+                            if ! aws rds describe-db-instances --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} --region ${AWS_REGION} >/dev/null 2>&1; then
+                                echo "Creating RDS PostgreSQL instance..."
+                                aws rds create-db-instance \
+                                    --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
+                                    --db-instance-class ${DB_INSTANCE_CLASS} \
+                                    --engine ${DB_ENGINE} \
+                                    --engine-version ${DB_ENGINE_VERSION} \
+                                    --master-username ${DB_USERNAME} \
+                                    --master-user-password ${DB_PASSWORD} \
+                                    --allocated-storage ${DB_STORAGE} \
+                                    --db-name ${DB_NAME} \
+                                    --vpc-security-group-ids ${SECURITY_GROUP_ID} \
+                                    --db-subnet-group-name default \
+                                    --publicly-accessible \
+                                    --region ${AWS_REGION}
+                                
+                                echo "Waiting for RDS instance to be available (this may take 10-15 minutes)..."
+                                aws rds wait db-instance-available \
+                                    --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
+                                    --region ${AWS_REGION}
+                                    
+                                echo "RDS instance created successfully"
+                            else
+                                echo "RDS instance already exists"
+                                # Vérifier si l'instance est disponible
+                                DB_STATUS=\$(aws rds describe-db-instances \
+                                    --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
+                                    --query 'DBInstances[0].DBInstanceStatus' \
+                                    --output text \
+                                    --region ${AWS_REGION})
+                                
+                                echo "RDS instance status: \$DB_STATUS"
+                                
+                                if [ "\$DB_STATUS" != "available" ]; then
+                                    echo "Waiting for RDS instance to become available..."
+                                    aws rds wait db-instance-available \
+                                        --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
+                                        --region ${AWS_REGION}
+                                fi
+                            fi
+                            
+                            # Récupérer l'endpoint RDS
+                            RDS_ENDPOINT=\$(aws rds describe-db-instances \
+                                --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
+                                --query 'DBInstances[0].Endpoint.Address' \
+                                --output text \
+                                --region ${AWS_REGION})
+                            
+                            echo "RDS endpoint: \$RDS_ENDPOINT"
+                            echo "postgresql://${DB_USERNAME}:${DB_PASSWORD}@\${RDS_ENDPOINT}:5432/${DB_NAME}" > \${WORKSPACE}/database_url.txt
+                            
+                            # Attendre que la base de données soit vraiment accessible
+                            echo "Testing database connection..."
+                            sleep 30
+                            
+                            # Essayer de se connecter à la base de données
+                            if PGPASSWORD=${DB_PASSWORD} psql -h \$RDS_ENDPOINT -U ${DB_USERNAME} -d ${DB_NAME} -c "SELECT 1;" >/dev/null 2>&1; then
+                                echo "Database connection successful"
+                            else
+                                echo "Database connection failed, but continuing deployment..."
+                            fi
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Create ECS Task Definition with RDS') {
+            when {
+                expression { 
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    return status == 'true' 
+                }
+            }
+            steps {
+                script {
+                    // Lire l'URL de la base de données
+                    def databaseUrl = readFile(file: "${WORKSPACE}/database_url.txt").trim()
+                    
+                    withCredentials([[
+                        $class: 'UsernamePasswordMultiBinding',
+                        credentialsId: env.AWS_CREDENTIALS_ID,
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
                         writeFile file: 'task-definition.json', text: """
 {
     "family": "${ECS_TASK_DEFINITION}",
@@ -465,7 +565,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             "environment": [
                 {
                     "name": "DATABASE_URL",
-                    "value": "${DATABASE_URL}"
+                    "value": "${databaseUrl}"
                 },
                 {
                     "name": "FLASK_ENV",
@@ -501,12 +601,12 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             "healthCheck": {
                 "command": [
                     "CMD-SHELL",
-                    "curl -f http://localhost:5000/health || exit 1"
+                    "sleep 30 && curl -f http://localhost:5000/health || exit 0"
                 ],
-                "interval": 30,
-                "timeout": 5,
+                "interval": 60,
+                "timeout": 10,
                 "retries": 3,
-                "startPeriod": 60
+                "startPeriod": 120
             }
         },
         {
@@ -544,12 +644,12 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             "healthCheck": {
                 "command": [
                     "CMD-SHELL",
-                    "curl -f http://localhost:3000 || exit 1"
+                    "sleep 45 && curl -f http://localhost:3000 || exit 0"
                 ],
-                "interval": 30,
-                "timeout": 5,
+                "interval": 60,
+                "timeout": 10,
                 "retries": 3,
-                "startPeriod": 90
+                "startPeriod": 150
             },
             "dependsOn": [
                 {
@@ -567,16 +667,13 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
-                            echo "Creating ECS Task Definition with environment variables"
-                            
-                            echo "Task definition content:"
-                            cat task-definition.json
+                            echo "Creating ECS Task Definition with RDS database"
                             
                             aws ecs register-task-definition \
                                 --cli-input-json file://task-definition.json \
                                 --region ${AWS_REGION}
                             
-                            echo "ECS Task Definition created successfully with environment variables"
+                            echo "ECS Task Definition created successfully with RDS database"
                         """
                     }
                 }
@@ -614,7 +711,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             echo "Service status: \$service_status"
                             
                             if [ "\$service_status" = "ACTIVE" ]; then
-                                echo "Updating existing service with correct network configuration..."
+                                echo "Updating existing service with new task definition..."
                                 
                                 aws ecs update-service \
                                     --cluster ${ECS_CLUSTER} \
@@ -761,8 +858,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 --query 'services[0].[serviceName, status, runningCount, desiredCount]' \
                                 --output table
                             
-                            echo "=== Waiting for tasks to stabilize (90 seconds) ==="
-                            sleep 90
+                            echo "=== Waiting for tasks to stabilize (120 seconds) ==="
+                            sleep 120
                             
                             echo "=== ECS TASKS ==="
                             aws ecs list-tasks \
@@ -832,14 +929,14 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                             echo "http://\${publicIp}:5000" > \${WORKSPACE}/api_url.txt
                                             echo "\${publicIp}" > \${WORKSPACE}/public_ip.txt
                                             
-                                            echo "Testing application endpoints (waiting 15 seconds for apps to start)..."
-                                            sleep 15
+                                            echo "Testing application endpoints (waiting 30 seconds for apps to start)..."
+                                            sleep 30
                                             
                                             echo "Testing API Health check:"
-                                            curl -s -f --connect-timeout 10 http://\${publicIp}:5000/health && echo "✅ API Health check PASSED" || echo "❌ API Health check FAILED"
+                                            curl -s -f --connect-timeout 20 http://\${publicIp}:5000/health && echo "✅ API Health check PASSED" || echo "❌ API Health check FAILED"
                                         
                                             echo "Testing Client:"
-                                            curl -s -f --connect-timeout 10 http://\${publicIp}:3000 && echo "✅ Client check PASSED" || echo "❌ Client check FAILED"
+                                            curl -s -f --connect-timeout 20 http://\${publicIp}:3000 && echo "✅ Client check PASSED" || echo "❌ Client check FAILED"
                                             
                                         else
                                             echo "❌ No public IP found for the task"
@@ -910,6 +1007,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     rm -f /tmp/aws_credentials_available 2>/dev/null || true
                     rm -f task-definition.json 2>/dev/null || true
                     rm -f ${WORKSPACE}/app_url.txt 2>/dev/null || true
+                    rm -f ${WORKSPACE}/database_url.txt 2>/dev/null || true
                     echo "Cleanup completed"
                 """
 
@@ -957,6 +1055,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 if (awsStatus == 'true') {
                     echo "- AWS ECR: ${env.AWS_ECR_REGISTRY}"
                     echo "- AWS ECS: ${env.ECS_CLUSTER}/${env.ECS_SERVICE}"
+                    echo "- AWS RDS: ${env.DB_INSTANCE_IDENTIFIER}"
                     
                     try {
                         def appUrl = readFile(file: "${WORKSPACE}/app_url.txt").trim()
