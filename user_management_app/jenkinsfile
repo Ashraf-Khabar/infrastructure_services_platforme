@@ -26,7 +26,11 @@ pipeline {
         ECR_CLIENT_REPOSITORY = 'user-management-client'
         ECS_CLUSTER = 'user-management-cluster'
         ECS_SERVICE = 'user-management-service'
+        ECS_TASK_DEFINITION = 'user-management-task'
         AWS_CREDENTIALS_ID = 'aws-credentials'
+        
+        SUBNET_IDS = 'subnet-07c7753f7a3e568fe,subnet-0855ecf8e69a20c39,subnet-0e49091aac1b8dc12'
+        SECURITY_GROUP_ID = 'sg-0d0b46466c78a871e'
     }
 
     stages {
@@ -348,7 +352,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             
                             if ! aws ecr describe-repositories --repository-names ${ECR_CLIENT_REPOSITORY} >/dev/null 2>&1; then
                                 echo "Creating ECR repository: ${ECR_CLIENT_REPOSITORY}"
-                                aws ecr create-repository --repository-name ${ECR_CLIENT_REPOSitORY}
+                                aws ecr create-repository --repository-name ${ECR_CLIENT_REPOSITORY}
                             else
                                 echo "ECR repository already exists: ${ECR_CLIENT_REPOSITORY}"
                             fi
@@ -419,7 +423,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
         }
 
-        stage('Verify ECS Cluster') {
+        stage('Create ECS Task Definition') {
             when {
                 expression { 
                     def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
@@ -439,8 +443,45 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
-                            echo "=== CHECKING ECS CLUSTER ==="
-                            aws ecs describe-clusters --clusters ${ECS_CLUSTER} --region ${AWS_REGION} || echo "Cluster does not exist"
+                            echo "Creating ECS Task Definition"
+                            
+                            cat > task-definition.json << EOF
+{
+    "family": "${ECS_TASK_DEFINITION}",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "256",
+    "memory": "512",
+    "executionRoleArn": "arn:aws:iam::036386574460:role/ecsTaskExecutionRole",
+    "containerDefinitions": [
+        {
+            "name": "user-management-api",
+            "image": "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest",
+            "essential": true,
+            "portMappings": [
+                {
+                    "containerPort": 5000,
+                    "protocol": "tcp"
+                }
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/user-management",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            }
+        }
+    ]
+}
+EOF
+
+                            aws ecs register-task-definition \
+                                --cli-input-json file://task-definition.json \
+                                --region ${AWS_REGION}
+                            
+                            echo "ECS Task Definition created successfully"
                         """
                     }
                 }
@@ -468,9 +509,21 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set region ${AWS_REGION}
                             
                             if ! aws ecs describe-services --cluster ${ECS_CLUSTER} --services ${ECS_SERVICE} --region ${AWS_REGION} >/dev/null 2>&1; then
-                                echo "Service ${ECS_SERVICE} does not exist. You need to create it first."
+                                echo "Service ${ECS_SERVICE} does not exist. Creating it..."
+                                
+                                aws ecs create-service \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --service-name ${ECS_SERVICE} \
+                                    --task-definition ${ECS_TASK_DEFINITION} \
+                                    --desired-count 1 \
+                                    --launch-type FARGATE \
+                                    --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
+                                    --region ${AWS_REGION}
+                                
+                                echo "ECS service created: ${ECS_SERVICE}"
+                                sleep 30
                             else
-                                echo "ECS service exists: ${ECS_SERVICE}"
+                                echo "ECS service already exists: ${ECS_SERVICE}"
                             fi
                         """
                     }
@@ -514,6 +567,15 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 --region ${AWS_REGION}
                             
                             echo "ECS deployment initiated successfully"
+                            
+                            sleep 10
+                            
+                            echo "Checking deployment status..."
+                            aws ecs describe-services \
+                                --cluster ${ECS_CLUSTER} \
+                                --services ${ECS_SERVICE} \
+                                --region ${AWS_REGION} \
+                                --query 'services[0].deployments[0]'
                         """
                     }
                 }
@@ -548,7 +610,20 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                 curl -s -f http://\${albDns}:5000/health && echo "✓ Health check passed" || echo "✗ Health check failed"
                                 curl -s http://\${albDns}:5000/ | head -n 3 || echo "✗ Main endpoint failed"
                             else
-                                echo "ALB DNS not found. Deployment might still be in progress."
+                                echo "ALB DNS not found. Checking ECS service directly..."
+                                
+                                taskIp=\$(aws ecs list-tasks --cluster ${ECS_CLUSTER} --service ${ECS_SERVICE} --region ${AWS_REGION} --query 'taskArns[0]' --output text)
+                                if [ "\$taskIp" != "None" ]; then
+                                    echo "Task found: \$taskIp"
+                                    eniId=\$(aws ecs describe-tasks --cluster ${ECS_CLUSTER} --tasks \$taskIp --region ${AWS_REGION} --query 'tasks[0].attachments[0].details[?name==\\`networkInterfaceId\\`].value' --output text)
+                                    if [ "\$eniId" != "None" ]; then
+                                        publicIp=\$(aws ec2 describe-network-interfaces --network-interface-ids \$eniId --region ${AWS_REGION} --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+                                        if [ "\$publicIp" != "None" ]; then
+                                            echo "Testing service at: \$publicIp"
+                                            curl -s -f http://\${publicIp}:5000/health && echo "✓ Health check passed" || echo "✗ Health check failed"
+                                        fi
+                                    fi
+                                fi
                             fi
                         """
                     }
@@ -580,6 +655,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     docker rmi ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest 2>/dev/null || true
                     
                     rm -f /tmp/aws_credentials_available 2>/dev/null || true
+                    rm -f task-definition.json 2>/dev/null || true
                     echo "Cleanup completed"
                 """
 
