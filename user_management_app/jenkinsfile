@@ -463,9 +463,37 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
+                            # Vérifier si le DB Subnet Group existe
+                            if ! aws rds describe-db-subnet-groups --db-subnet-group-name user-management-db-subnet-group --region ${AWS_REGION} >/dev/null 2>&1; then
+                                echo "Creating DB Subnet Group..."
+                                aws rds create-db-subnet-group \
+                                    --db-subnet-group-name user-management-db-subnet-group \
+                                    --db-subnet-group-description "Subnet group for user management database" \
+                                    --subnet-ids ${SUBNET_IDS} \
+                                    --region ${AWS_REGION}
+                            else
+                                echo "DB Subnet Group already exists"
+                            fi
+                            
                             # Vérifier si RDS existe déjà
-                            if ! aws rds describe-db-instances --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} --region ${AWS_REGION} >/dev/null 2>&1; then
+                            if aws rds describe-db-instances --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} --region ${AWS_REGION} >/dev/null 2>&1; then
+                                echo "RDS instance already exists"
+                                
+                                # Récupérer l'endpoint RDS
+                                RDS_ENDPOINT=\$(aws rds describe-db-instances \
+                                    --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
+                                    --query 'DBInstances[0].Endpoint.Address' \
+                                    --output text \
+                                    --region ${AWS_REGION})
+                                
+                                echo "RDS endpoint: \$RDS_ENDPOINT"
+                                echo "postgresql://${DB_USERNAME}:${DB_PASSWORD}@\${RDS_ENDPOINT}:5432/${DB_NAME}" > \${WORKSPACE}/database_url.txt
+                                
+                            else
                                 echo "Creating RDS PostgreSQL instance..."
+                                
+                                # Essayer de créer l'instance RDS
+                                set +e
                                 aws rds create-db-instance \
                                     --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
                                     --db-instance-class ${DB_INSTANCE_CLASS} \
@@ -476,60 +504,65 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                                     --allocated-storage ${DB_STORAGE} \
                                     --db-name ${DB_NAME} \
                                     --vpc-security-group-ids ${SECURITY_GROUP_ID} \
-                                    --db-subnet-group-name default \
+                                    --db-subnet-group-name user-management-db-subnet-group \
                                     --publicly-accessible \
                                     --region ${AWS_REGION}
                                 
-                                echo "Waiting for RDS instance to be available (this may take 10-15 minutes)..."
-                                aws rds wait db-instance-available \
-                                    --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
-                                    --region ${AWS_REGION}
-                                    
-                                echo "RDS instance created successfully"
-                            else
-                                echo "RDS instance already exists"
-                                # Vérifier si l'instance est disponible
-                                DB_STATUS=\$(aws rds describe-db-instances \
-                                    --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
-                                    --query 'DBInstances[0].DBInstanceStatus' \
-                                    --output text \
-                                    --region ${AWS_REGION})
+                                CREATE_EXIT_CODE=\$?
+                                set -e
                                 
-                                echo "RDS instance status: \$DB_STATUS"
-                                
-                                if [ "\$DB_STATUS" != "available" ]; then
-                                    echo "Waiting for RDS instance to become available..."
+                                if [ \$CREATE_EXIT_CODE -eq 0 ]; then
+                                    echo "RDS instance creation initiated successfully"
+                                    echo "Waiting for RDS instance to be available (this may take 10-15 minutes)..."
                                     aws rds wait db-instance-available \
                                         --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
                                         --region ${AWS_REGION}
+                                        
+                                    # Récupérer l'endpoint RDS
+                                    RDS_ENDPOINT=\$(aws rds describe-db-instances \
+                                        --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
+                                        --query 'DBInstances[0].Endpoint.Address' \
+                                        --output text \
+                                        --region ${AWS_REGION})
+                                    
+                                    echo "RDS endpoint: \$RDS_ENDPOINT"
+                                    echo "postgresql://${DB_USERNAME}:${DB_PASSWORD}@\${RDS_ENDPOINT}:5432/${DB_NAME}" > \${WORKSPACE}/database_url.txt
+                                    
+                                else
+                                    echo "ERROR: Failed to create RDS instance"
+                                    echo "Please check IAM permissions and try again"
+                                    currentBuild.result = 'FAILURE'
+                                    error("Failed to create RDS instance")
                                 fi
                             fi
                             
-                            # Récupérer l'endpoint RDS
-                            RDS_ENDPOINT=\$(aws rds describe-db-instances \
-                                --db-instance-identifier ${DB_INSTANCE_IDENTIFIER} \
-                                --query 'DBInstances[0].Endpoint.Address' \
-                                --output text \
-                                --region ${AWS_REGION})
-                            
-                            echo "RDS endpoint: \$RDS_ENDPOINT"
-                            echo "postgresql://${DB_USERNAME}:${DB_PASSWORD}@\${RDS_ENDPOINT}:5432/${DB_NAME}" > \${WORKSPACE}/database_url.txt
-                            
-                            # Attendre que la base de données soit vraiment accessible
+                            # Attendre que la base de données soit accessible
                             echo "Testing database connection..."
-                            sleep 30
+                            sleep 60
+                            
+                            DATABASE_URL=\$(cat \${WORKSPACE}/database_url.txt)
+                            RDS_HOST=\$(echo \$DATABASE_URL | cut -d'@' -f2 | cut -d':' -f1)
                             
                             # Essayer de se connecter à la base de données
-                            if PGPASSWORD=${DB_PASSWORD} psql -h \$RDS_ENDPOINT -U ${DB_USERNAME} -d ${DB_NAME} -c "SELECT 1;" >/dev/null 2>&1; then
-                                echo "Database connection successful"
-                            else
-                                echo "Database connection failed, but continuing deployment..."
-                            fi
+                                                # Essayer de se connecter à la base de données
+                            set +e
+                            for i in {1..10}; do
+                                echo "Database connection attempt \$i/10"
+                                if PGPASSWORD=${DB_PASSWORD} psql -h \$RDS_HOST -U ${DB_USERNAME} -d ${DB_NAME} -c "SELECT 1;" >/dev/null 2>&1; then
+                                    echo "Database connection successful"
+                                    break
+                                else
+                                    echo "Database connection failed, retrying in 30 seconds..."
+                                    sleep 30
+                                fi
+                            done
+                            set -e
                         """
                     }
                 }
             }
         }
+
 
         stage('Create ECS Task Definition with RDS') {
             when {
