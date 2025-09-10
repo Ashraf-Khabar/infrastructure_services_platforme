@@ -422,17 +422,21 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 script {
                     echo "Building Docker images for AWS ECR"
                     
-                    // First, verify the requirements.txt exists and has content
-                    sh """
-                        echo "=== API REQUIREMENTS ==="
-                        cat ${APP_DIR}/api/requirements.txt || echo "No requirements.txt found"
-                        echo "========================"
-                    """
-                    
+                    // Create a temporary Dockerfile with Python 3.11
                     sh """
                         cd ${APP_DIR}/api
-                        docker build --no-cache -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} .
+                        echo "FROM python:3.11-slim" > Dockerfile.tmp
+                        echo "WORKDIR /app" >> Dockerfile.tmp
+                        echo "RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*" >> Dockerfile.tmp
+                        echo "COPY requirements.txt ." >> Dockerfile.tmp
+                        echo "RUN pip install --no-cache-dir -r requirements.txt" >> Dockerfile.tmp
+                        echo "COPY . ." >> Dockerfile.tmp
+                        echo "EXPOSE 5000" >> Dockerfile.tmp
+                        echo 'CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]' >> Dockerfile.tmp
+                        
+                        docker build -f Dockerfile.tmp -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} .
                         docker tag ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
+                        rm Dockerfile.tmp
                     """
                     sh """
                         cd ${APP_DIR}/client
