@@ -1,6 +1,6 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 sqlalchemy==2.0.23
-psycopg==3.1.9
+psycopg2-binary==2.9.10  # Use psycopg2-binary instead of psycopg
 python-multipart==0.0.6
-pydantic==2.4.2  # Try an earlier version
+pydantic==2.6.0  # Use a newer version that might have better 3.13 support
