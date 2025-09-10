@@ -382,6 +382,35 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
         }
 
+        stage('Verify Docker Images') {
+            when {
+                expression { 
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    return status == 'true' 
+                }
+            }
+            steps {
+                script {
+                    echo "Verifying Docker image contents..."
+                    
+                    sh """
+                        # Check Python version in the API image
+                        echo "=== PYTHON VERSION IN API IMAGE ==="
+                        docker run --rm ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest python --version
+                        
+                        echo "=== PYTHON PACKAGES IN API IMAGE ==="
+                        docker run --rm ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest pip list
+                        
+                        echo "=== CHECKING FASTAPI INSTALLATION ==="
+                        docker run --rm ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest python -c "import fastapi; print('FastAPI version:', fastapi.__version__)" || echo "FastAPI not installed"
+                        
+                        echo "=== CHECKING PSYCOPG2 INSTALLATION ==="
+                        docker run --rm ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest python -c "import psycopg2; print('psycopg2 version:', psycopg2.__version__)" || echo "psycopg2 not installed"
+                    """
+                }
+            }
+        }
+
         stage('Build Docker Images') {
             when {
                 expression { 
