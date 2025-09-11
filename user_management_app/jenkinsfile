@@ -255,7 +255,7 @@ pipeline {
                             script {
                                 def outputFile = "${ROBOT_REPORTS_DIR}/output.xml"
                                 if (fileExists(outputFile)) {
-                                    robot outputPath: "${ROBOT_REPORTS_DIR}",
+                                    robot outputPath: "${ROBOT_REPORts_DIR}",
                                           outputFileName: "output.xml",
                                           reportFileName: "report.html",
                                           logFileName: "log.html",
@@ -441,16 +441,16 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 script {
                     echo "Building Docker images for AWS ECR"
                     
-                    // Build API image
+                    // Build API image with corrected Dockerfile
                     sh '''
                         cd $APP_DIR/api
-                        # Create temporary Dockerfile
-                        cat > Dockerfile.tmp << 'EOF'
+                        # Create corrected Dockerfile
+                        cat > Dockerfile.ecr << 'EOF'
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for psycopg2
+# Install system dependencies for psycopg2 and build essentials
 RUN apt-get update && apt-get install -y \\
     gcc \\
     libpq-dev \\
@@ -459,8 +459,9 @@ RUN apt-get update && apt-get install -y \\
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \\
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
@@ -468,28 +469,57 @@ COPY . .
 # Expose the port
 EXPOSE 5000
 
-# Command to run the application
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
+# Command to run the application with Gunicorn
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:5000", "app:app"]
 EOF
                         
-                        # Build and tag the image
-                        docker build -f Dockerfile.tmp -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER} .
+                        docker build -f Dockerfile.ecr -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER} .
                         docker tag ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
                         
                         # Verify the image exists
                         docker images | grep ${ECR_API_REPOSITORY}
                         
-                        rm Dockerfile.tmp
+                        rm Dockerfile.ecr
                     '''
                     
-                    // Build Client image
+                    // Build Client image with corrected Dockerfile
                     sh '''
                         cd $APP_DIR/client
-                        docker build -t ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER} .
+                        # Create corrected Dockerfile
+                        cat > Dockerfile.ecr << 'EOF'
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+    gunicorn \\
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \\
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Expose the port
+EXPOSE 3000
+
+# Command to run the application
+CMD ["gunicorn", "-w", "4", "--bind", "0.0.0.0:3000", "app:app"]
+EOF
+                        
+                        docker build -f Dockerfile.ecr -t ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER} .
                         docker tag ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
                         
                         # Verify the image exists
                         docker images | grep ${ECR_CLIENT_REPOSITORY}
+                        
+                        rm Dockerfile.ecr
                     '''
                 }
             }
@@ -545,6 +575,62 @@ EOF
                 }
             }
         }
+
+        stage('Deploy to ECS') {
+            when {
+                expression { 
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    return status == 'true' 
+                }
+            }
+            steps {
+                script {
+                    echo "Deploying to AWS ECS"
+                    withCredentials([[
+                        $class: 'UsernamePasswordMultiBinding',
+                        credentialsId: env.AWS_CREDENTIALS_ID,
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh '''
+                            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region ${AWS_REGION}
+                            
+                            # Update ECS service to force new deployment
+                            echo "Updating ECS service..."
+                            aws ecs update-service \
+                                --cluster ${ECS_CLUSTER} \
+                                --service ${ECS_SERVICE} \
+                                --force-new-deployment \
+                                --region ${AWS_REGION}
+                            
+                            echo "Waiting for service to stabilize..."
+                            aws ecs wait services-stable \
+                                --cluster ${ECS_CLUSTER} \
+                                --services ${ECS_SERVICE} \
+                                --region ${AWS_REGION}
+                            
+                            # Get the public DNS of the load balancer
+                            echo "Getting application URL..."
+                            ALB_DNS=$(aws elbv2 describe-load-balancers \
+                                --names user-management-alb \
+                                --region ${AWS_REGION} \
+                                --query "LoadBalancers[0].DNSName" \
+                                --output text) || echo "ALB not found"
+                            
+                            if [ ! -z "$ALB_DNS" ] && [ "$ALB_DNS" != "None" ]; then
+                                echo "Application URL: http://$ALB_DNS" > ${WORKSPACE}/app_url.txt
+                                echo "Application deployed successfully: http://$ALB_DNS"
+                            else
+                                echo "ALB not found, application URL not available" > ${WORKSPACE}/app_url.txt
+                                echo "Application deployed but ALB not found"
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
     }
 
     post {
@@ -556,9 +642,13 @@ EOF
                 
                 def appUrl = "Not available"
                 try {
-                    appUrl = readFile(file: "${WORKSPACE}/app_url.txt").trim()
+                    if (fileExists("${WORKSPACE}/app_url.txt")) {
+                        appUrl = readFile(file: "${WORKSPACE}/app_url.txt").trim()
+                    } else {
+                        appUrl = "Not available (ECS deployment not configured)"
+                    }
                 } catch (Exception e) {
-                    appUrl = "Not available"
+                    appUrl = "Not available (Error reading file)"
                 }
                 
                 sh """
@@ -571,17 +661,11 @@ EOF
                     pkill -f "python.*app\\.py" 2>/dev/null || true
                     pkill -f "uvicorn" 2>/dev/null || true
                     
-                    # Don't remove images immediately - they might be needed for deployment
-                    # docker rmi ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} 2>/dev/null || true
-                    # docker rmi ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} 2>/dev/null || true
-                    # docker rmi ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest 2>/dev/null || true
-                    # docker rmi ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest 2>/dev/null || true
-                    
                     rm -f /tmp/aws_credentials_available 2>/dev/null || true
                     rm -f task-definition.json 2>/dev/null || true
                     rm -f ${WORKSPACE}/app_url.txt 2>/dev/null || true
                     rm -f ${WORKSPACE}/database_url.txt 2>/dev/null || true
-                    echo "Cleanup completed (images preserved for potential deployment)"
+                    echo "Cleanup completed"
                 """
 
                 def statusColor
@@ -631,9 +715,14 @@ EOF
                     echo "- AWS RDS: ${env.DB_INSTANCE_IDENTIFIER}"
                     
                     try {
-                        def appUrl = readFile(file: "${WORKSPACE}/app_url.txt").trim()
+                        def appUrl = "Not available"
+                        if (fileExists("${WORKSPACE}/app_url.txt")) {
+                            appUrl = readFile(file: "${WORKSPACE}/app_url.txt").trim()
+                        }
                         echo "-  Application URL: ${appUrl}"
-                        echo "-  Health Check: ${appUrl}/health"
+                        if (!appUrl.contains("not available")) {
+                            echo "-  Health Check: ${appUrl}/health"
+                        }
                     } catch (Exception e) {
                         echo "-  Application URL: Not available (check ECS service)"
                     }
