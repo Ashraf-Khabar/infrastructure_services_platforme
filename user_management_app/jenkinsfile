@@ -52,17 +52,18 @@ pipeline {
     }
 
     stages {
+
         stage('Setup Python Environment') {
             steps {
                 sh '''
                     sudo apt update -y
                     sudo apt install -y python3 python3-pip python3-venv curl docker.io jq postgresql-client
-                    python3 -m venv ${VENV_PATH}
-                    ${VENV_PATH}/bin/pip install --upgrade pip
+                    python3 -m venv $VENV_PATH
+                    $VENV_PATH/bin/pip install --upgrade pip
                     
                     echo "=== VERSIONS DES OUTILS ==="
                     echo "Python: $(python3 --version)"
-                    echo "Pip: $(${VENV_PATH}/bin/pip --version)"
+                    echo "Pip: $($VENV_PATH/bin/pip --version)"
                     echo "AWS CLI: $(aws --version 2>&1)"
                     echo "Docker: $(docker --version)"
                     echo "jq: $(jq --version)"
@@ -117,19 +118,19 @@ pipeline {
                             
                             // First install compatible pydantic-core and pydantic v2.x
                             sh '''
-                                ${VENV_PATH}/bin/pip install "pydantic-core>=2.14.0" "pydantic>=2.5.0"
-                                ${VENV_PATH}/bin/pip install "fastapi>=0.104.0" "uvicorn[standard]>=0.24.0"
+                                $VENV_PATH/bin/pip install "pydantic-core>=2.14.0" "pydantic>=2.5.0"
+                                $VENV_PATH/bin/pip install "fastapi>=0.104.0" "uvicorn[standard]>=0.24.0"
                             '''
                             
                             // Install other requirements, skipping already installed packages
                             sh '''
-                                ${VENV_PATH}/bin/pip install -r ${APP_DIR}/api/requirements.txt --no-deps || \
+                                $VENV_PATH/bin/pip install -r $APP_DIR/api/requirements.txt --no-deps || \
                                 echo "Some dependencies may have issues, continuing with individual installation..."
                             '''
                             
                             // Install common dependencies individually to ensure compatibility
                             sh '''
-                                ${VENV_PATH}/bin/pip install "sqlalchemy>=2.0.0" \
+                                $VENV_PATH/bin/pip install "sqlalchemy>=2.0.0" \
                                     "psycopg2-binary>=2.9.0" \
                                     "alembic>=1.0.0" \
                                     "python-multipart>=0.0.0" \
@@ -140,44 +141,44 @@ pipeline {
                             // Verify critical packages are installed and compatible
                             sh '''
                                 echo "=== VERIFYING CRITICAL PACKAGES ==="
-                                ${VENV_PATH}/bin/python -c "import pydantic; print('Pydantic:', pydantic.VERSION)"
-                                ${VENV_PATH}/bin/python -c "import fastapi; print('FastAPI:', fastapi.__version__)"
-                                ${VENV_PATH}/bin/python -c "import sqlalchemy; print('SQLAlchemy:', sqlalchemy.__version__)"
-                                ${VENV_PATH}/bin/python -c "import psycopg2; print('psycopg2:', psycopg2.__version__)"
-                                echo "Python version: $(${VENV_PATH}/bin/python --version)"
+                                $VENV_PATH/bin/python -c "import pydantic; print('Pydantic:', pydantic.VERSION)"
+                                $VENV_PATH/bin/python -c "import fastapi; print('FastAPI:', fastapi.__version__)"
+                                $VENV_PATH/bin/python -c "import sqlalchemy; print('SQLAlchemy:', sqlalchemy.__version__)"
+                                $VENV_PATH/bin/python -c "import psycopg2; print('psycopg2:', psycopg2.__version__)"
+                                echo "Python version: $($VENV_PATH/bin/python --version)"
                             '''
                         }
                     }
                 }
                 stage('Client Dependencies') {
                     steps { 
-                        sh '${VENV_PATH}/bin/pip install -r ${APP_DIR}/client/requirements.txt'
+                        sh '$VENV_PATH/bin/pip install -r $APP_DIR/client/requirements.txt'
                     }
                 }
                 stage('Test Dependencies') {
                     steps { 
-                        sh '${VENV_PATH}/bin/pip install pytest requests'
+                        sh '$VENV_PATH/bin/pip install pytest requests'
                     }
                 }
                 stage('Robot Framework Dependencies') {
                     steps {
                         sh '''
-                            ${VENV_PATH}/bin/pip install robotframework
-                            ${VENV_PATH}/bin/pip install robotframework-requests
-                            ${VENV_PATH}/bin/pip install robotframework-databaselibrary
-                            ${VENV_PATH}/bin/pip install psycopg2-binary
+                            $VENV_PATH/bin/pip install robotframework
+                            $VENV_PATH/bin/pip install robotframework-requests
+                            $VENV_PATH/bin/pip install robotframework-databaselibrary
+                            $VENV_PATH/bin/pip install psycopg2-binary
                         '''
                     }
                 }
                 stage('Prometheus Dependencies') {
                     steps { 
-                        sh '${VENV_PATH}/bin/pip install prometheus-client'
+                        sh '$VENV_PATH/bin/pip install prometheus-client'
                     }
                 }
                 stage('AWS Dependencies') {
                     steps {
                         sh '''
-                            ${VENV_PATH}/bin/pip install boto3
+                            $VENV_PATH/bin/pip install boto3
                         '''
                     }
                 }
@@ -188,20 +189,20 @@ pipeline {
             steps {
                 script {
                     echo "Starting API server"
-                    sh """
-                        cd ${APP_DIR}/api
-                        nohup ${VENV_PATH}/bin/python app.py > /dev/null 2>&1 &
-                        echo \$! > ${API_PID_FILE}
+                    sh '''
+                        cd $APP_DIR/api
+                        nohup $VENV_PATH/bin/python app.py > /dev/null 2>&1 &
+                        echo $! > $API_PID_FILE
                         sleep 3
-                    """
+                    '''
 
                     timeout(time: 60, unit: 'SECONDS') {
                         waitUntil {
                             try {
-                                sh """
+                                sh '''
                                     curl -s -f http://localhost:5000/health > /dev/null && \
                                     curl -s -f http://localhost:5000/ > /dev/null
-                                """
+                                '''
                                 echo "API is ready and responding!"
                                 return true
                             } catch (Exception e) {
@@ -219,19 +220,19 @@ pipeline {
             parallel {
                 stage('API Tests') {
                     steps { 
-                        sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_api.py -v --tb=short" 
+                        sh '$VENV_PATH/bin/python -m pytest $APP_DIR/tests/test_api.py -v --tb=short' 
                     }
-                }
-                stage('Model Tests') {
-                    steps { 
-                        sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_models.py -v --tb=short" 
                     }
-                }
-                stage('Unit Tests') {
-                    steps { 
-                        sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_unit.py -v --tb=short" 
+                    stage('Model Tests') {
+                        steps { 
+                            sh '$VENV_PATH/bin/python -m pytest $APP_DIR/tests/test_models.py -v --tb=short' 
+                        }
                     }
-                }
+                    stage('Unit Tests') {
+                        steps { 
+                            sh '$VENV_PATH/bin/python -m pytest $APP_DIR/tests/test_unit.py -v --tb=short' 
+                        }
+                    }
                 stage('Robot Framework Tests') {
                     steps {
                         script {
