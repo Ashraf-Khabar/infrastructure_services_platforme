@@ -440,17 +440,17 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
             steps {
                 script {
-                    echo "Building Docker images for AWS ECR with Python 3.13 compatibility"
+                    echo "Building Docker images for AWS ECR"
                     
-                    // Create a temporary Dockerfile with explicit version compatibility
+                    // Build API image
                     sh '''
-                        cd ${APP_DIR}/api
+                        cd $APP_DIR/api
                         cat > Dockerfile.tmp << 'EOF'
-                        FROM python:3.13-slim
+                        FROM python:3.11-slim
 
                         WORKDIR /app
 
-                        # Install system dependencies
+                        # Install system dependencies for psycopg2
                         RUN apt-get update && apt-get install -y \\
                             gcc \\
                             libpq-dev \\
@@ -459,14 +459,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         # Copy requirements first to leverage Docker cache
                         COPY requirements.txt .
 
-                        # Install compatible versions for Python 3.13
-                        RUN pip install --no-cache-dir \\
-                            "pydantic>=2.5.0" \\
-                            "pydantic-core>=2.14.0" \\
-                            "fastapi>=0.104.0" \\
-                            "uvicorn[standard]>=0.24.0"
-
-                        # Install other requirements
+                        # Install dependencies
                         RUN pip install --no-cache-dir -r requirements.txt
 
                         # Copy application code
@@ -478,15 +471,17 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         # Command to run the application
                         CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
                         EOF
-                            
-                        docker build -f Dockerfile.tmp -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} .
-                        docker tag ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
+                        
+                        docker build -f Dockerfile.tmp -t ''' + "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER}" + ''' .
+                        docker tag ''' + "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER}" + ''' ''' + "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest" + '''
                         rm Dockerfile.tmp
                     '''
+                    
+                    // Build Client image - FIXED THIS PART
                     sh '''
-                        cd ${APP_DIR}/client
-                        docker build -t ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} .
-                        docker tag ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
+                        cd $APP_DIR/client
+                        docker build -t ''' + "${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER}" + ''' .
+                        docker tag ''' + "${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER}" + ''' ''' + "${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest" + '''
                     '''
                 }
             }
