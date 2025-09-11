@@ -32,7 +32,6 @@ pipeline {
         SUBNET_IDS = 'subnet-07c7753f7a3e568fe,subnet-0855ecf8e69a20c39,subnet-0e49091aac1b8dc12'
         SECURITY_GROUP_ID = 'sg-0d0b46466c78a871e'
         
-        // Database configuration
         DB_INSTANCE_IDENTIFIER = 'user-management-db'
         DB_NAME = 'user_management'
         DB_USERNAME = 'appuser'
@@ -42,7 +41,6 @@ pipeline {
         DB_ENGINE_VERSION = '15.4'
         DB_STORAGE = '20'
         
-        // Application Environment Variables
         FLASK_ENV = 'production'
         FLASK_DEBUG = '0'
         REACT_APP_API_URL = 'http://localhost:5000'
@@ -99,7 +97,6 @@ pipeline {
                 script {
                     echo "Fixing Python 3.13 compatibility issues for pydantic..."
                     
-                    // First try to install pre-built pydantic-core
                     sh '''
                         $VENV_PATH/bin/pip install --only-binary pydantic-core "pydantic-core>=2.14.0" || \
                         echo "Pre-built pydantic-core not available, will try pydantic 1.x"
@@ -115,19 +112,16 @@ pipeline {
                         script {
                             echo "Installing API dependencies with Python 3.13 compatibility"
                             
-                            // First install compatible pydantic-core and pydantic v2.x
                             sh '''
                                 $VENV_PATH/bin/pip install "pydantic-core>=2.14.0" "pydantic>=2.5.0"
                                 $VENV_PATH/bin/pip install "fastapi>=0.104.0" "uvicorn[standard]>=0.24.0"
                             '''
-                            
-                            // Install other requirements, skipping already installed packages
+
                             sh '''
                                 $VENV_PATH/bin/pip install -r $APP_DIR/api/requirements.txt --no-deps || \
                                 echo "Some dependencies may have issues, continuing with individual installation..."
                             '''
-                            
-                            // Install common dependencies individually to ensure compatibility
+
                             sh '''
                                 $VENV_PATH/bin/pip install "sqlalchemy>=2.0.0" \
                                     "psycopg2-binary>=2.9.0" \
@@ -136,8 +130,7 @@ pipeline {
                                     "python-jose>=3.0.0" \
                                     "passlib>=1.7.0"
                             '''
-                            
-                            // Verify critical packages are installed and compatible
+
                             sh '''
                                 echo "=== VERIFYING CRITICAL PACKAGES ==="
                                 $VENV_PATH/bin/python -c "import pydantic; print('Pydantic:', pydantic.VERSION)"
@@ -275,14 +268,14 @@ pipeline {
                 script {
                     echo "Pushing metrics to Prometheus"
                     def metrics = """
-# HELP jenkins_custom_build_info Build information
-# TYPE jenkins_custom_build_info gauge
-jenkins_custom_build_info{job="${env.JOB_NAME}", build_number="${env.BUILD_NUMBER}", result="${currentBuild.currentResult}"} 1
+                        # HELP jenkins_custom_build_info Build information
+                        # TYPE jenkins_custom_build_info gauge
+                        jenkins_custom_build_info{job="${env.JOB_NAME}", build_number="${env.BUILD_NUMBER}", result="${currentBuild.currentResult}"} 1
 
-# HELP jenkins_custom_build_duration_seconds Build duration in seconds
-# TYPE jenkins_custom_build_duration_seconds gauge
-jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.duration / 1000}
-"""
+                        # HELP jenkins_custom_build_duration_seconds Build duration in seconds
+                        # TYPE jenkins_custom_build_duration_seconds gauge
+                        jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.duration / 1000}
+                    """
                     try {
                         sh """
                             echo '${metrics}' | curl --connect-timeout 5 --max-time 10 -X POST --data-binary @- ${PROMETHEUS_PUSH_GATEWAY}/metrics/job/jenkins/instance/${env.JOB_NAME} || echo "Prometheus push failed"
@@ -437,41 +430,41 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     return status == 'true' 
                 }
             }
+
             steps {
                 script {
                     echo "Building Docker images for AWS ECR"
-                    
-                    // Build API image with corrected Dockerfile
+
                     sh '''
                         cd $APP_DIR/api
                         # Create corrected Dockerfile
                         cat > Dockerfile.ecr << 'EOF'
-FROM python:3.11-slim
+                        FROM python:3.11-slim
 
-WORKDIR /app
+                        WORKDIR /app
 
-# Install system dependencies for psycopg2 and build essentials
-RUN apt-get update && apt-get install -y \\
-    gcc \\
-    libpq-dev \\
-    && rm -rf /var/lib/apt/lists/*
+                        # Install system dependencies for psycopg2 and build essentials
+                        RUN apt-get update && apt-get install -y \\
+                            gcc \\
+                            libpq-dev \\
+                            && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+                        # Copy requirements first to leverage Docker cache
+                        COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \\
-    pip install --no-cache-dir -r requirements.txt
+                        # Install Python dependencies
+                        RUN pip install --no-cache-dir --upgrade pip && \\
+                            pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+                        # Copy application code
+                        COPY . .
 
-# Expose the port
-EXPOSE 5000
+                        # Expose the port
+                        EXPOSE 5000
 
-# Command to run the application with Gunicorn
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:5000", "app:app"]
-EOF
+                        # Command to run the application with Gunicorn
+                        CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:5000", "app:app"]
+                        EOF
                         
                         docker build -f Dockerfile.ecr -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER} .
                         docker tag ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
@@ -481,37 +474,36 @@ EOF
                         
                         rm Dockerfile.ecr
                     '''
-                    
-                    // Build Client image with corrected Dockerfile
+
                     sh '''
                         cd $APP_DIR/client
                         # Create corrected Dockerfile
                         cat > Dockerfile.ecr << 'EOF'
-FROM python:3.9-slim
+                        FROM python:3.9-slim
 
-WORKDIR /app
+                        WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \\
-    gunicorn \\
-    && rm -rf /var/lib/apt/lists/*
+                        # Install system dependencies
+                        RUN apt-get update && apt-get install -y \\
+                            gunicorn \\
+                            && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first
-COPY requirements.txt .
+                        # Copy requirements first
+                        COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \\
-    pip install --no-cache-dir -r requirements.txt
+                        # Install Python dependencies
+                        RUN pip install --no-cache-dir --upgrade pip && \\
+                            pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+                        # Copy application code
+                        COPY . .
 
-# Expose the port
-EXPOSE 3000
+                        # Expose the port
+                        EXPOSE 3000
 
-# Command to run the application
-CMD ["gunicorn", "-w", "4", "--bind", "0.0.0.0:3000", "app:app"]
-EOF
+                        # Command to run the application
+                        CMD ["gunicorn", "-w", "4", "--bind", "0.0.0.0:3000", "app:app"]
+                        EOF
                         
                         docker build -f Dockerfile.ecr -t ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER} .
                         docker tag ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
@@ -679,16 +671,10 @@ EOF
                                     --force-new-deployment \
                                     --region ${AWS_REGION}
                                 
-                                echo "Waiting for service to stabilize..."
-                                aws ecs wait services-stable \
-                                    --cluster ${ECS_CLUSTER} \
-                                    --services ${ECS_SERVICE} \
-                                    --region ${AWS_REGION}
-                                    
                             elif [ "$SERVICE_STATUS" = "NOT_EXIST" ] || [ "$SERVICE_STATUS" = "INACTIVE" ]; then
                                 echo "Service does not exist or is inactive. Creating new service..."
                                 
-                                # First, check if task definition exists
+                                # Check if task definition exists
                                 TASK_DEFINITION_STATUS=$(aws ecs describe-task-definition \
                                     --task-definition ${ECS_TASK_DEFINITION} \
                                     --region ${AWS_REGION} \
@@ -696,12 +682,11 @@ EOF
                                     --output text 2>/dev/null || echo "NOT_EXIST")
                                 
                                 if [ "$TASK_DEFINITION_STATUS" = "NOT_EXIST" ]; then
-                                    echo "ERROR: Task definition ${ECS_TASK_DEFINITION} does not exist"
-                                    echo "Please create the task definition first using Terraform or AWS CLI"
+                                    echo "ERROR: Task definition ${ECS_TASK_DINITION} does not exist"
                                     exit 1
                                 fi
                                 
-                                # Create the service
+                                # Create the service with desired count 1
                                 aws ecs create-service \
                                     --cluster ${ECS_CLUSTER} \
                                     --service-name ${ECS_SERVICE} \
@@ -710,17 +695,71 @@ EOF
                                     --launch-type FARGATE \
                                     --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
                                     --region ${AWS_REGION}
-                                
-                                echo "Waiting for service to become active..."
-                                sleep 30
-                                aws ecs wait services-stable \
-                                    --cluster ${ECS_CLUSTER} \
-                                    --services ${ECS_SERVICE} \
-                                    --region ${AWS_REGION}
                                     
                             else
                                 echo "Service status: $SERVICE_STATUS - cannot deploy"
                                 exit 1
+                            fi
+                            
+                            echo "Waiting for service to stabilize (with timeout)..."
+                            # Wait with timeout and better error handling
+                            timeout 300 aws ecs wait services-stable \
+                                --cluster ${ECS_CLUSTER} \
+                                --services ${ECS_SERVICE} \
+                                --region ${AWS_REGION} || \
+                            echo "Service stabilization timeout or failed - checking status..."
+                            
+                            # Get detailed service status for debugging
+                            echo "=== SERVICE DETAILS ==="
+                            aws ecs describe-services \
+                                --cluster ${ECS_CLUSTER} \
+                                --services ${ECS_SERVICE} \
+                                --region ${AWS_REGION}
+                            
+                            # Check tasks status for debugging
+                            echo "=== RUNNING TASKS ==="
+                            aws ecs list-tasks \
+                                --cluster ${ECS_CLUSTER} \
+                                --service-name ${ECS_SERVICE} \
+                                --region ${AWS_REGION}
+                            
+                            # If tasks exist, get their status
+                            TASK_ARNS=$(aws ecs list-tasks \
+                                --cluster ${ECS_CLUSTER} \
+                                --service-name ${ECS_SERVICE} \
+                                --region ${AWS_REGION} \
+                                --query "taskArns" \
+                                --output text)
+                            
+                            if [ ! -z "$TASK_ARNS" ] && [ "$TASK_ARNS" != "None" ]; then
+                                echo "=== TASKS DETAILS ==="
+                                aws ecs describe-tasks \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --tasks $TASK_ARNS \
+                                    --region ${AWS_REGION} \
+                                    --query "tasks[].{arn:taskArn,lastStatus:lastStatus,healthStatus:healthStatus,stoppedReason:stoppedReason}"
+                                    
+                                # Get task logs for debugging
+                                for task_arn in $TASK_ARNS; do
+                                    echo "=== LOGS FOR TASK $task_arn ==="
+                                    # Get the task definition to find cloudwatch log group
+                                    TASK_DEFINITION_ARN=$(aws ecs describe-tasks \
+                                        --cluster ${ECS_CLUSTER} \
+                                        --tasks $task_arn \
+                                        --region ${AWS_REGION} \
+                                        --query "tasks[0].taskDefinitionArn" \
+                                        --output text)
+                                        
+                                    # Try to get logs from CloudWatch if configured
+                                    aws logs describe-log-streams \
+                                        --log-group-name "/ecs/${ECS_TASK_DEFINITION}" \
+                                        --region ${AWS_REGION} \
+                                        --query "logStreams[0].logStreamName" \
+                                        --output text | xargs -I {} aws logs get-log-events \
+                                        --log-group-name "/ecs/${ECS_TASK_DEFINITION}" \
+                                        --log-stream-name {} \
+                                        --region ${AWS_REGION} || echo "No CloudWatch logs available"
+                                done
                             fi
                             
                             # Get the public DNS of the load balancer
@@ -735,8 +774,20 @@ EOF
                                 echo "Application URL: http://$ALB_DNS" > ${WORKSPACE}/app_url.txt
                                 echo "Application deployed successfully: http://$ALB_DNS"
                             else
-                                echo "ALB not found, application URL not available" > ${WORKSPACE}/app_url.txt
-                                echo "Application deployed but ALB not found"
+                                echo "ALB not found, checking for any load balancer..."
+                                # Try to find any ALB associated with the cluster
+                                ALB_DNS=$(aws elbv2 describe-load-balancers \
+                                    --region ${AWS_REGION} \
+                                    --query "LoadBalancers[?contains(LoadBalancerName, 'user-management')].DNSName" \
+                                    --output text | head -n 1) || echo "No ALB found"
+                                
+                                if [ ! -z "$ALB_DNS" ] && [ "$ALB_DNS" != "None" ]; then
+                                    echo "Application URL: http://$ALB_DNS" > ${WORKSPACE}/app_url.txt
+                                    echo "Application deployed successfully: http://$ALB_DNS"
+                                else
+                                    echo "ALB not found, application URL not available" > ${WORKSPACE}/app_url.txt
+                                    echo "Application deployed but ALB not found"
+                                fi
                             fi
                         '''
                     }
