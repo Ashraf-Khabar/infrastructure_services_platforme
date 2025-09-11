@@ -255,7 +255,7 @@ pipeline {
                             script {
                                 def outputFile = "${ROBOT_REPORTS_DIR}/output.xml"
                                 if (fileExists(outputFile)) {
-                                    robot outputPath: "${ROBOT_REPORts_DIR}",
+                                    robot outputPath: "${ROBOT_REPORTS_DIR}",
                                           outputFileName: "output.xml",
                                           reportFileName: "report.html",
                                           logFileName: "log.html",
@@ -525,6 +525,45 @@ EOF
             }
         }
 
+        stage('Check Network Connectivity') {
+            when {
+                expression { 
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    return status == 'true' 
+                }
+            }
+            steps {
+                script {
+                    echo "Checking network connectivity to ECR"
+                    withCredentials([[
+                        $class: 'UsernamePasswordMultiBinding',
+                        credentialsId: env.AWS_CREDENTIALS_ID,
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh '''
+                            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region ${AWS_REGION}
+                            
+                            # Test ECR connectivity
+                            echo "Testing ECR connectivity..."
+                            timeout 30 aws ecr describe-repositories --region ${AWS_REGION} >/dev/null && \
+                            echo "ECR connectivity test passed" || \
+                            echo "ECR connectivity test failed"
+                            
+                            # Test network connectivity
+                            echo "Testing network connectivity to ECR endpoint..."
+                            ECR_HOST=$(echo ${AWS_ECR_REGISTRY} | cut -d'/' -f1)
+                            timeout 30 curl -I https://${ECR_HOST} >/dev/null && \
+                            echo "Network connectivity test passed" || \
+                            echo "Network connectivity test failed"
+                        '''
+                    }
+                }
+            }
+        }
+
         stage('Push to AWS ECR') {
             when {
                 expression { 
@@ -534,7 +573,7 @@ EOF
             }
             steps {
                 script {
-                    echo "Pushing Docker images to AWS ECR"
+                    echo "Pushing Docker images to AWS ECR (with retry logic)"
                     withCredentials([[
                         $class: 'UsernamePasswordMultiBinding',
                         credentialsId: env.AWS_CREDENTIALS_ID,
@@ -550,20 +589,47 @@ EOF
                             ECR_PASSWORD=$(aws ecr get-login-password --region ${AWS_REGION})
                             echo "$ECR_PASSWORD" | docker login --username AWS --password-stdin ${AWS_ECR_REGISTRY}
                             
+                            # Set longer timeouts
+                            export DOCKER_CLIENT_TIMEOUT=120
+                            export COMPOSE_HTTP_TIMEOUT=120
+                            
                             echo "=== VERIFYING LOCAL IMAGES ==="
                             docker images
-                            echo "=== LISTING IMAGES FOR ${ECR_API_REPOSITORY} ==="
-                            docker images | grep ${ECR_API_REPOSITORY} || echo "No API images found locally"
-                            echo "=== LISTING IMAGES FOR ${ECR_CLIENT_REPOSITORY} ==="
-                            docker images | grep ${ECR_CLIENT_REPOSITORY} || echo "No Client images found locally"
                             
-                            echo "Pushing API image..."
-                            docker push ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER}
-                            docker push ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
+                            # Function to push with retries
+                            push_with_retry() {
+                                local image=$1
+                                local max_attempts=3
+                                local attempt=1
+                                local wait_time=10
+                                
+                                while [ $attempt -le $max_attempts ]; do
+                                    echo "Attempt $attempt to push $image"
+                                    if docker push $image; then
+                                        echo "Successfully pushed $image"
+                                        return 0
+                                    else
+                                        echo "Attempt $attempt failed, waiting $wait_time seconds before retry..."
+                                        sleep $wait_time
+                                        attempt=$((attempt + 1))
+                                        wait_time=$((wait_time * 2)) # Exponential backoff
+                                    fi
+                                done
+                                echo "All $max_attempts attempts failed for $image"
+                                return 1
+                            }
                             
-                            echo "Pushing Client image..."
-                            docker push ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER}
-                            docker push ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
+                            echo "Pushing API image version ${BUILD_NUMBER}..."
+                            push_with_retry ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER}
+                            
+                            echo "Pushing API latest image..."
+                            push_with_retry ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
+                            
+                            echo "Pushing Client image version ${BUILD_NUMBER}..."
+                            push_with_retry ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER}
+                            
+                            echo "Pushing Client latest image..."
+                            push_with_retry ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
                             
                             echo "All images pushed successfully to ECR"
                             
