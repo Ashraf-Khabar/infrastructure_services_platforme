@@ -113,29 +113,38 @@ pipeline {
                 stage('API Dependencies') {
                     steps { 
                         script {
-                            echo "Installing API dependencies with compatibility handling"
+                            echo "Installing API dependencies with Python 3.13 compatibility"
                             
-                            // Try to install requirements normally first
+                            // First install compatible pydantic-core and pydantic v2.x
                             sh """
-                                ${VENV_PATH}/bin/pip install -r ${APP_DIR}/api/requirements.txt || \
-                                echo "Standard installation failed, trying fallback..."
+                                ${VENV_PATH}/bin/pip install "pydantic-core>=2.14.0" "pydantic>=2.5.0"
+                                ${VENV_PATH}/bin/pip install "fastapi>=0.104.0" "uvicorn[standard]>=0.24.0"
                             """
                             
-                            // Fallback: if pydantic failed, install version 1.x
+                            // Install other requirements, skipping already installed packages
                             sh """
-                                ${VENV_PATH}/bin/python -c "import pydantic" 2>/dev/null || \
-                                (echo "Installing pydantic 1.x as fallback" && \
-                                ${VENV_PATH}/bin/pip install "pydantic==1.10.13" "fastapi==0.104.1") && \
-                                echo "Pydantic installation completed"
+                                ${VENV_PATH}/bin/pip install -r ${APP_DIR}/api/requirements.txt --no-deps || \
+                                echo "Some dependencies may have issues, continuing with individual installation..."
                             """
                             
-                            // Verify critical packages are installed
+                            // Install common dependencies individually to ensure compatibility
+                            sh """
+                                ${VENV_PATH}/bin/pip install "sqlalchemy>=2.0.0" \
+                                    "psycopg2-binary>=2.9.0" \
+                                    "alembic>=1.0.0" \
+                                    "python-multipart>=0.0.0" \
+                                    "python-jose>=3.0.0" \
+                                    "passlib>=1.7.0"
+                            """
+                            
+                            // Verify critical packages are installed and compatible
                             sh """
                                 echo "=== VERIFYING CRITICAL PACKAGES ==="
-                                ${VENV_PATH}/bin/python -c "import fastapi; print('FastAPI:', fastapi.__version__)" || echo "FastAPI not installed"
-                                ${VENV_PATH}/bin/python -c "import pydantic; print('Pydantic:', pydantic.VERSION)" || echo "Pydantic not installed"
-                                ${VENV_PATH}/bin/python -c "import sqlalchemy; print('SQLAlchemy:', sqlalchemy.__version__)" || echo "SQLAlchemy not installed"
-                                ${VENV_PATH}/bin/python -c "import psycopg2; print('psycopg2:', psycopg2.__version__)" || echo "psycopg2 not installed"
+                                ${VENV_PATH}/bin/python -c "import pydantic; print('Pydantic:', pydantic.VERSION)"
+                                ${VENV_PATH}/bin/python -c "import fastapi; print('FastAPI:', fastapi.__version__)"
+                                ${VENV_PATH}/bin/python -c "import sqlalchemy; print('SQLAlchemy:', sqlalchemy.__version__)"
+                                ${VENV_PATH}/bin/python -c "import psycopg2; print('psycopg2:', psycopg2.__version__)"
+                                echo "Python version: $(${VENV_PATH}/bin/python --version)"
                             """
                         }
                     }
@@ -430,49 +439,56 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
             steps {
                 script {
-                    echo "Building Docker images for AWS ECR"
+                    echo "Building Docker images for AWS ECR with Python 3.13 compatibility"
                     
-                    // Create a temporary Dockerfile with Python 3.11 pour éviter les problèmes de compatibilité
+                    // Create a temporary Dockerfile with explicit version compatibility
                     sh """
                         cd ${APP_DIR}/api
                         cat > Dockerfile.tmp << 'EOF'
-FROM python:3.11-slim
+                        FROM python:3.13-slim
 
-WORKDIR /app
+                        WORKDIR /app
 
-# Install system dependencies for psycopg2
-RUN apt-get update && apt-get install -y \\
-    gcc \\
-    libpq-dev \\
-    && rm -rf /var/lib/apt/lists/*
+                        # Install system dependencies
+                        RUN apt-get update && apt-get install -y \\
+                            gcc \\
+                            libpq-dev \\
+                            && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+                        # Copy requirements first to leverage Docker cache
+                        COPY requirements.txt .
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+                        # Install compatible versions for Python 3.13
+                        RUN pip install --no-cache-dir \\
+                            "pydantic>=2.5.0" \\
+                            "pydantic-core>=2.14.0" \\
+                            "fastapi>=0.104.0" \\
+                            "uvicorn[standard]>=0.24.0"
 
-# Copy application code
-COPY . .
+                        # Install other requirements
+                        RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose the port
-EXPOSE 5000
+                        # Copy application code
+                        COPY . .
 
-# Command to run the application
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
-EOF
-                        
-                        docker build -f Dockerfile.tmp -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} .
-                        docker tag ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
-                        rm Dockerfile.tmp
-                    """
-                    sh """
-                        cd ${APP_DIR}/client
-                        docker build -t ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} .
-                        docker tag ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
-                    """
-                }
-            }
+                        # Expose the port
+                        EXPOSE 5000
+
+                        # Command to run the application
+                        CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
+                        EOF
+                                            
+                                            docker build -f Dockerfile.tmp -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} .
+                                            docker tag ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
+                                            rm Dockerfile.tmp
+                                    """
+                                    sh """
+                                        cd ${APP_DIR}/client
+                                        docker build -t ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} .
+                                        docker tag ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
+                                    """
+                                }
+                            }
         }
 
         stage('Push to AWS ECR') {
