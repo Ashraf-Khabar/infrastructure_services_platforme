@@ -663,19 +663,65 @@ EOF
                             aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
-                            # Update ECS service to force new deployment
-                            echo "Updating ECS service..."
-                            aws ecs update-service \
-                                --cluster ${ECS_CLUSTER} \
-                                --service ${ECS_SERVICE} \
-                                --force-new-deployment \
-                                --region ${AWS_REGION}
-                            
-                            echo "Waiting for service to stabilize..."
-                            aws ecs wait services-stable \
+                            # Check if service exists and is active
+                            SERVICE_STATUS=$(aws ecs describe-services \
                                 --cluster ${ECS_CLUSTER} \
                                 --services ${ECS_SERVICE} \
-                                --region ${AWS_REGION}
+                                --region ${AWS_REGION} \
+                                --query "services[0].status" \
+                                --output text 2>/dev/null || echo "NOT_EXIST")
+                            
+                            if [ "$SERVICE_STATUS" = "ACTIVE" ]; then
+                                echo "Updating existing ECS service..."
+                                aws ecs update-service \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --service ${ECS_SERVICE} \
+                                    --force-new-deployment \
+                                    --region ${AWS_REGION}
+                                
+                                echo "Waiting for service to stabilize..."
+                                aws ecs wait services-stable \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --services ${ECS_SERVICE} \
+                                    --region ${AWS_REGION}
+                                    
+                            elif [ "$SERVICE_STATUS" = "NOT_EXIST" ] || [ "$SERVICE_STATUS" = "INACTIVE" ]; then
+                                echo "Service does not exist or is inactive. Creating new service..."
+                                
+                                # First, check if task definition exists
+                                TASK_DEFINITION_STATUS=$(aws ecs describe-task-definition \
+                                    --task-definition ${ECS_TASK_DEFINITION} \
+                                    --region ${AWS_REGION} \
+                                    --query "taskDefinition.status" \
+                                    --output text 2>/dev/null || echo "NOT_EXIST")
+                                
+                                if [ "$TASK_DEFINITION_STATUS" = "NOT_EXIST" ]; then
+                                    echo "ERROR: Task definition ${ECS_TASK_DEFINITION} does not exist"
+                                    echo "Please create the task definition first using Terraform or AWS CLI"
+                                    exit 1
+                                fi
+                                
+                                # Create the service
+                                aws ecs create-service \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --service-name ${ECS_SERVICE} \
+                                    --task-definition ${ECS_TASK_DEFINITION} \
+                                    --desired-count 1 \
+                                    --launch-type FARGATE \
+                                    --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SECURITY_GROUP_ID}],assignPublicIp=ENABLED}" \
+                                    --region ${AWS_REGION}
+                                
+                                echo "Waiting for service to become active..."
+                                sleep 30
+                                aws ecs wait services-stable \
+                                    --cluster ${ECS_CLUSTER} \
+                                    --services ${ECS_SERVICE} \
+                                    --region ${AWS_REGION}
+                                    
+                            else
+                                echo "Service status: $SERVICE_STATUS - cannot deploy"
+                                exit 1
+                            fi
                             
                             # Get the public DNS of the load balancer
                             echo "Getting application URL..."
