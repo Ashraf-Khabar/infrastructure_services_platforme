@@ -52,7 +52,6 @@ pipeline {
     }
 
     stages {
-
         stage('Setup Python Environment') {
             steps {
                 sh '''
@@ -101,10 +100,10 @@ pipeline {
                     echo "Fixing Python 3.13 compatibility issues for pydantic..."
                     
                     // First try to install pre-built pydantic-core
-                    sh """
-                        ${VENV_PATH}/bin/pip install --only-binary pydantic-core "pydantic-core>=2.14.0" || \
+                    sh '''
+                        $VENV_PATH/bin/pip install --only-binary pydantic-core "pydantic-core>=2.14.0" || \
                         echo "Pre-built pydantic-core not available, will try pydantic 1.x"
-                    """
+                    '''
                 }
             }
         }
@@ -220,35 +219,35 @@ pipeline {
             parallel {
                 stage('API Tests') {
                     steps { 
-                        sh '$VENV_PATH/bin/python -m pytest $APP_DIR/tests/test_api.py -v --tb=short' 
+                        sh '$VENV_PATH/bin/python -m pytest $APP_DIR/tests/test_api.py -v --tb=short'
                     }
+                }
+                stage('Model Tests') {
+                    steps { 
+                        sh '$VENV_PATH/bin/python -m pytest $APP_DIR/tests/test_models.py -v --tb=short'
                     }
-                    stage('Model Tests') {
-                        steps { 
-                            sh '$VENV_PATH/bin/python -m pytest $APP_DIR/tests/test_models.py -v --tb=short' 
-                        }
+                }
+                stage('Unit Tests') {
+                    steps { 
+                        sh '$VENV_PATH/bin/python -m pytest $APP_DIR/tests/test_unit.py -v --tb=short'
                     }
-                    stage('Unit Tests') {
-                        steps { 
-                            sh '$VENV_PATH/bin/python -m pytest $APP_DIR/tests/test_unit.py -v --tb=short' 
-                        }
-                    }
+                }
                 stage('Robot Framework Tests') {
                     steps {
                         script {
-                            sh """
-                                mkdir -p ${ROBOT_REPORTS_DIR}
-                                cd ${APP_DIR}/robot_tests
+                            sh '''
+                                mkdir -p $ROBOT_REPORTS_DIR
+                                cd $APP_DIR/robot_tests
                                 set +e
-                                ${VENV_PATH}/bin/robot \
-                                    --outputdir ${ROBOT_REPORTS_DIR} \
+                                $VENV_PATH/bin/robot \
+                                    --outputdir $ROBOT_REPORTS_DIR \
                                     --output output.xml \
                                     --report report.html \
                                     --log log.html \
                                     --xunit xunit.xml \
                                     . || echo "Robot Framework tests finished with failures"
                                 set -e
-                            """
+                            '''
                         }
                     }
                     post {
@@ -300,20 +299,20 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             steps {
                 script {
                     echo "Stopping API server"
-                    sh """
-                        if [ -f ${API_PID_FILE} ]; then
-                            PID=\$(cat ${API_PID_FILE})
-                            echo "Stopping API process: \$PID"
-                            kill \$PID 2>/dev/null || true
+                    sh '''
+                        if [ -f $API_PID_FILE ]; then
+                            PID=$(cat $API_PID_FILE)
+                            echo "Stopping API process: $PID"
+                            kill $PID 2>/dev/null || true
                             sleep 2
-                            kill -9 \$PID 2>/dev/null || true
-                            rm -f ${API_PID_FILE}
+                            kill -9 $PID 2>/dev/null || true
+                            rm -f $API_PID_FILE
                             echo "API server stopped"
                         else
                             echo "No API PID file found, stopping any python app processes"
                             pkill -f "python.*app\\.py" 2>/dev/null || true
                         fi
-                    """
+                    '''
                 }
             }
         }
@@ -322,15 +321,15 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             steps {
                 script {
                     echo "Building Python package"
-                    sh '${VENV_PATH}/bin/pip install setuptools wheel'
-                    sh """
-                        cd ${APP_DIR}
-                        ${VENV_PATH}/bin/python setup.py sdist bdist_wheel
-                    """
-                    sh "ls -la ${APP_DIR}/dist/"
+                    sh '$VENV_PATH/bin/pip install setuptools wheel'
+                    sh '''
+                        cd $APP_DIR
+                        $VENV_PATH/bin/python setup.py sdist bdist_wheel
+                    '''
+                    sh "ls -la $APP_DIR/dist/"
                     
                     def packageVersion = sh(
-                        script: "${VENV_PATH}/bin/python -c \"import setuptools; setup = setuptools.setup(); print(setup.get('version', 'N/A'))\" 2>/dev/null || echo 'N/A'",
+                        script: "$VENV_PATH/bin/python -c \"import setuptools; setup = setuptools.setup(); print(setup.get('version', 'N/A'))\" 2>/dev/null || echo 'N/A'",
                         returnStdout: true
                     ).trim()
                     env.PYTHON_PACKAGE_VERSION = packageVersion
@@ -347,14 +346,14 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'NEXUS_USER',
                         passwordVariable: 'NEXUS_PASSWORD'
                     )]) {
-                        sh """
-                            cd ${APP_DIR}
-                            ${VENV_PATH}/bin/pip install twine
-                            ${VENV_PATH}/bin/twine upload \
+                        sh '''
+                            cd $APP_DIR
+                            $VENV_PATH/bin/pip install twine
+                            $VENV_PATH/bin/twine upload \
                                 --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
-                                -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
+                                -u $NEXUS_USER -p $NEXUS_PASSWORD \
                                 dist/* || echo "Nexus upload failed"
-                        """
+                        '''
                     }
                 }
             }
@@ -375,9 +374,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        sh """
-                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
-                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
+                        sh '''
+                            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
                             echo "=== ECR REPOSITORIES ==="
@@ -386,7 +385,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             echo "=== CURRENT IMAGES ==="
                             aws ecr list-images --repository-name ${ECR_API_REPOSITORY} --region ${AWS_REGION}
                             aws ecr list-images --repository-name ${ECR_CLIENT_REPOSITORY} --region ${AWS_REGION}
-                        """
+                        '''
                     }
                 }
             }
@@ -407,9 +406,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        sh """
-                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
-                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
+                        sh '''
+                            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
                             if ! aws ecr describe-repositories --repository-names ${ECR_API_REPOSITORY} >/dev/null 2>&1; then
@@ -425,7 +424,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             else
                                 echo "ECR repository already exists: ${ECR_CLIENT_REPOSITORY}"
                             fi
-                        """
+                        '''
                     }
                 }
             }
@@ -445,43 +444,52 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     // Build API image
                     sh '''
                         cd $APP_DIR/api
+                        # Create temporary Dockerfile
                         cat > Dockerfile.tmp << 'EOF'
-                        FROM python:3.11-slim
+FROM python:3.11-slim
 
-                        WORKDIR /app
+WORKDIR /app
 
-                        # Install system dependencies for psycopg2
-                        RUN apt-get update && apt-get install -y \\
-                            gcc \\
-                            libpq-dev \\
-                            && rm -rf /var/lib/apt/lists/*
+# Install system dependencies for psycopg2
+RUN apt-get update && apt-get install -y \\
+    gcc \\
+    libpq-dev \\
+    && rm -rf /var/lib/apt/lists/*
 
-                        # Copy requirements first to leverage Docker cache
-                        COPY requirements.txt .
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
 
-                        # Install dependencies
-                        RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-                        # Copy application code
-                        COPY . .
+# Copy application code
+COPY . .
 
-                        # Expose the port
-                        EXPOSE 5000
+# Expose the port
+EXPOSE 5000
 
-                        # Command to run the application
-                        CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
-                        EOF
+# Command to run the application
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]
+EOF
                         
-                        docker build -f Dockerfile.tmp -t ''' + "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER}" + ''' .
-                        docker tag ''' + "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER}" + ''' ''' + "${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest" + '''
+                        # Build and tag the image
+                        docker build -f Dockerfile.tmp -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER} .
+                        docker tag ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
+                        
+                        # Verify the image exists
+                        docker images | grep ${ECR_API_REPOSITORY}
+                        
                         rm Dockerfile.tmp
                     '''
                     
-                    // Build Client image - FIXED THIS PART
+                    // Build Client image
                     sh '''
                         cd $APP_DIR/client
-                        docker build -t ''' + "${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER}" + ''' .
-                        docker tag ''' + "${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER}" + ''' ''' + "${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest" + '''
+                        docker build -t ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER} .
+                        docker tag ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
+                        
+                        # Verify the image exists
+                        docker images | grep ${ECR_CLIENT_REPOSITORY}
                     '''
                 }
             }
@@ -503,29 +511,40 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         usernameVariable: 'AWS_ACCESS_KEY_ID',
                         passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
-                        sh """
-                            aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
-                            aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
+                        sh '''
+                            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
                             aws configure set region ${AWS_REGION}
                             
-                            ECR_PASSWORD=\$(aws ecr get-login-password --region ${AWS_REGION})
-                            echo "\$ECR_PASSWORD" | docker login --username AWS --password-stdin ${AWS_ECR_REGISTRY}
+                            # Get ECR login password
+                            ECR_PASSWORD=$(aws ecr get-login-password --region ${AWS_REGION})
+                            echo "$ECR_PASSWORD" | docker login --username AWS --password-stdin ${AWS_ECR_REGISTRY}
+                            
+                            echo "=== VERIFYING LOCAL IMAGES ==="
+                            docker images
+                            echo "=== LISTING IMAGES FOR ${ECR_API_REPOSITORY} ==="
+                            docker images | grep ${ECR_API_REPOSITORY} || echo "No API images found locally"
+                            echo "=== LISTING IMAGES FOR ${ECR_CLIENT_REPOSITORY} ==="
+                            docker images | grep ${ECR_CLIENT_REPOSITORY} || echo "No Client images found locally"
                             
                             echo "Pushing API image..."
+                            docker push ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER}
                             docker push ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
                             
                             echo "Pushing Client image..."
+                            docker push ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER}
                             docker push ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
                             
                             echo "All images pushed successfully to ECR"
-                        """
+                            
+                            echo "=== VERIFYING ECR IMAGES ==="
+                            aws ecr list-images --repository-name ${ECR_API_REPOSITORY} --region ${AWS_REGION}
+                            aws ecr list-images --repository-name ${ECR_CLIENT_REPOSITORY} --region ${AWS_REGION}
+                        '''
                     }
                 }
             }
         }
-
-        // ... les autres stages restent les mêmes ...
-
     }
 
     post {
@@ -552,16 +571,17 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     pkill -f "python.*app\\.py" 2>/dev/null || true
                     pkill -f "uvicorn" 2>/dev/null || true
                     
-                    docker rmi ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} 2>/dev/null || true
-                    docker rmi ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} 2>/dev/null || true
-                    docker rmi ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest 2>/dev/null || true
-                    docker rmi ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest 2>/dev/null || true
+                    # Don't remove images immediately - they might be needed for deployment
+                    # docker rmi ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${env.BUILD_NUMBER} 2>/dev/null || true
+                    # docker rmi ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${env.BUILD_NUMBER} 2>/dev/null || true
+                    # docker rmi ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest 2>/dev/null || true
+                    # docker rmi ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest 2>/dev/null || true
                     
                     rm -f /tmp/aws_credentials_available 2>/dev/null || true
                     rm -f task-definition.json 2>/dev/null || true
                     rm -f ${WORKSPACE}/app_url.txt 2>/dev/null || true
                     rm -f ${WORKSPACE}/database_url.txt 2>/dev/null || true
-                    echo "Cleanup completed"
+                    echo "Cleanup completed (images preserved for potential deployment)"
                 """
 
                 def statusColor
