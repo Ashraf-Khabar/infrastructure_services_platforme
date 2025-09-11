@@ -32,6 +32,7 @@ pipeline {
         SUBNET_IDS = 'subnet-07c7753f7a3e568fe,subnet-0855ecf8e69a20c39,subnet-0e49091aac1b8dc12'
         SECURITY_GROUP_ID = 'sg-0d0b46466c78a871e'
         
+        // Database configuration
         DB_INSTANCE_IDENTIFIER = 'user-management-db'
         DB_NAME = 'user_management'
         DB_USERNAME = 'appuser'
@@ -41,6 +42,7 @@ pipeline {
         DB_ENGINE_VERSION = '15.4'
         DB_STORAGE = '20'
         
+        // Application Environment Variables
         FLASK_ENV = 'production'
         FLASK_DEBUG = '0'
         REACT_APP_API_URL = 'http://localhost:5000'
@@ -97,6 +99,7 @@ pipeline {
                 script {
                     echo "Fixing Python 3.13 compatibility issues for pydantic..."
                     
+                    // First try to install pre-built pydantic-core
                     sh '''
                         $VENV_PATH/bin/pip install --only-binary pydantic-core "pydantic-core>=2.14.0" || \
                         echo "Pre-built pydantic-core not available, will try pydantic 1.x"
@@ -112,16 +115,19 @@ pipeline {
                         script {
                             echo "Installing API dependencies with Python 3.13 compatibility"
                             
+                            // First install compatible pydantic-core and pydantic v2.x
                             sh '''
                                 $VENV_PATH/bin/pip install "pydantic-core>=2.14.0" "pydantic>=2.5.0"
                                 $VENV_PATH/bin/pip install "fastapi>=0.104.0" "uvicorn[standard]>=0.24.0"
                             '''
-
+                            
+                            // Install other requirements, skipping already installed packages
                             sh '''
                                 $VENV_PATH/bin/pip install -r $APP_DIR/api/requirements.txt --no-deps || \
                                 echo "Some dependencies may have issues, continuing with individual installation..."
                             '''
-
+                            
+                            // Install common dependencies individually to ensure compatibility
                             sh '''
                                 $VENV_PATH/bin/pip install "sqlalchemy>=2.0.0" \
                                     "psycopg2-binary>=2.9.0" \
@@ -130,7 +136,8 @@ pipeline {
                                     "python-jose>=3.0.0" \
                                     "passlib>=1.7.0"
                             '''
-
+                            
+                            // Verify critical packages are installed and compatible
                             sh '''
                                 echo "=== VERIFYING CRITICAL PACKAGES ==="
                                 $VENV_PATH/bin/python -c "import pydantic; print('Pydantic:', pydantic.VERSION)"
@@ -268,14 +275,14 @@ pipeline {
                 script {
                     echo "Pushing metrics to Prometheus"
                     def metrics = """
-                        # HELP jenkins_custom_build_info Build information
-                        # TYPE jenkins_custom_build_info gauge
-                        jenkins_custom_build_info{job="${env.JOB_NAME}", build_number="${env.BUILD_NUMBER}", result="${currentBuild.currentResult}"} 1
+# HELP jenkins_custom_build_info Build information
+# TYPE jenkins_custom_build_info gauge
+jenkins_custom_build_info{job="${env.JOB_NAME}", build_number="${env.BUILD_NUMBER}", result="${currentBuild.currentResult}"} 1
 
-                        # HELP jenkins_custom_build_duration_seconds Build duration in seconds
-                        # TYPE jenkins_custom_build_duration_seconds gauge
-                        jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.duration / 1000}
-                    """
+# HELP jenkins_custom_build_duration_seconds Build duration in seconds
+# TYPE jenkins_custom_build_duration_seconds gauge
+jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.duration / 1000}
+"""
                     try {
                         sh """
                             echo '${metrics}' | curl --connect-timeout 5 --max-time 10 -X POST --data-binary @- ${PROMETHEUS_PUSH_GATEWAY}/metrics/job/jenkins/instance/${env.JOB_NAME} || echo "Prometheus push failed"
@@ -430,88 +437,108 @@ pipeline {
                     return status == 'true' 
                 }
             }
-
             steps {
                 script {
-                    echo "Building Docker images for AWS ECR"
-
+                    echo "Building Docker images for AWS ECR - Build #${env.BUILD_NUMBER}"
+                    
+                    // Clean up previous images to avoid conflicts
+                    sh '''
+                        docker system prune -f
+                        # Remove only old images, keep current build
+                        docker images | grep ${AWS_ECR_REGISTRY} | grep -v "${BUILD_NUMBER}\\|latest" | awk '{print $3}' | xargs docker rmi -f 2>/dev/null || true
+                    '''
+                    
+                    // Build API image with corrected Dockerfile
                     sh '''
                         cd $APP_DIR/api
                         # Create corrected Dockerfile
                         cat > Dockerfile.ecr << 'EOF'
-                        FROM python:3.11-slim
+FROM python:3.11-slim
 
-                        WORKDIR /app
+WORKDIR /app
 
-                        # Install system dependencies for psycopg2 and build essentials
-                        RUN apt-get update && apt-get install -y \\
-                            gcc \\
-                            libpq-dev \\
-                            && rm -rf /var/lib/apt/lists/*
+# Install system dependencies for psycopg2 and build essentials
+RUN apt-get update && apt-get install -y \\
+    gcc \\
+    libpq-dev \\
+    && rm -rf /var/lib/apt/lists/*
 
-                        # Copy requirements first to leverage Docker cache
-                        COPY requirements.txt .
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
 
-                        # Install Python dependencies
-                        RUN pip install --no-cache-dir --upgrade pip && \\
-                            pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \\
+    pip install --no-cache-dir -r requirements.txt
 
-                        # Copy application code
-                        COPY . .
+# Copy application code
+COPY . .
 
-                        # Expose the port
-                        EXPOSE 5000
+# Expose the port
+EXPOSE 5000
 
-                        # Command to run the application with Gunicorn
-                        CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:5000", "app:app"]
-                        EOF
+# Command to run the application with Gunicorn
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:5000", "app:app"]
+EOF
                         
+                        echo "Building API image with tag: ${BUILD_NUMBER}"
                         docker build -f Dockerfile.ecr -t ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER} .
                         docker tag ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:latest
                         
                         # Verify the image exists
+                        echo "=== VERIFYING API IMAGE ==="
                         docker images | grep ${ECR_API_REPOSITORY}
                         
                         rm Dockerfile.ecr
                     '''
-
+                    
+                    // Build Client image with corrected Dockerfile
                     sh '''
                         cd $APP_DIR/client
                         # Create corrected Dockerfile
                         cat > Dockerfile.ecr << 'EOF'
-                        FROM python:3.9-slim
+FROM python:3.9-slim
 
-                        WORKDIR /app
+WORKDIR /app
 
-                        # Install system dependencies
-                        RUN apt-get update && apt-get install -y \\
-                            gunicorn \\
-                            && rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+    gunicorn \\
+    && rm -rf /var/lib/apt/lists/*
 
-                        # Copy requirements first
-                        COPY requirements.txt .
+# Copy requirements first
+COPY requirements.txt .
 
-                        # Install Python dependencies
-                        RUN pip install --no-cache-dir --upgrade pip && \\
-                            pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \\
+    pip install --no-cache-dir -r requirements.txt
 
-                        # Copy application code
-                        COPY . .
+# Copy application code
+COPY . .
 
-                        # Expose the port
-                        EXPOSE 3000
+# Expose the port
+EXPOSE 3000
 
-                        # Command to run the application
-                        CMD ["gunicorn", "-w", "4", "--bind", "0.0.0.0:3000", "app:app"]
-                        EOF
+# Command to run the application
+CMD ["gunicorn", "-w", "4", "--bind", "0.0.0.0:3000", "app:app"]
+EOF
                         
+                        echo "Building Client image with tag: ${BUILD_NUMBER}"
                         docker build -f Dockerfile.ecr -t ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER} .
                         docker tag ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER} ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:latest
                         
                         # Verify the image exists
+                        echo "=== VERIFYING CLIENT IMAGE ==="
                         docker images | grep ${ECR_CLIENT_REPOSITORY}
                         
                         rm Dockerfile.ecr
+                    '''
+                    
+                    // Verify both images exist
+                    sh '''
+                        echo "=== ALL DOCKER IMAGES ==="
+                        docker images
+                        echo "=== IMAGES READY FOR PUSH ==="
+                        docker images | grep ${AWS_ECR_REGISTRY}
                     '''
                 }
             }
@@ -565,7 +592,7 @@ pipeline {
             }
             steps {
                 script {
-                    echo "Pushing Docker images to AWS ECR (with retry logic)"
+                    echo "Pushing Docker images to AWS ECR (with retry logic) - Build #${env.BUILD_NUMBER}"
                     withCredentials([[
                         $class: 'UsernamePasswordMultiBinding',
                         credentialsId: env.AWS_CREDENTIALS_ID,
@@ -585,8 +612,19 @@ pipeline {
                             export DOCKER_CLIENT_TIMEOUT=120
                             export COMPOSE_HTTP_TIMEOUT=120
                             
-                            echo "=== VERIFYING LOCAL IMAGES ==="
-                            docker images
+                            echo "=== VERIFYING LOCAL IMAGES FOR BUILD ${BUILD_NUMBER} ==="
+                            docker images | grep ${BUILD_NUMBER}
+                            
+                            # Verify images exist before pushing
+                            if ! docker image inspect ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER} >/dev/null 2>&1; then
+                                echo "ERROR: API image ${AWS_ECR_REGISTRY}/${ECR_API_REPOSITORY}:${BUILD_NUMBER} does not exist locally"
+                                exit 1
+                            fi
+                            
+                            if ! docker image inspect ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER} >/dev/null 2>&1; then
+                                echo "ERROR: Client image ${AWS_ECR_REGISTRY}/${ECR_CLIENT_REPOSITORY}:${BUILD_NUMBER} does not exist locally"
+                                exit 1
+                            fi
                             
                             # Function to push with retries
                             push_with_retry() {
@@ -628,6 +666,43 @@ pipeline {
                             echo "=== VERIFYING ECR IMAGES ==="
                             aws ecr list-images --repository-name ${ECR_API_REPOSITORY} --region ${AWS_REGION}
                             aws ecr list-images --repository-name ${ECR_CLIENT_REPOSITORY} --region ${AWS_REGION}
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Check ECS Service Status') {
+            when {
+                expression { 
+                    def status = sh(script: 'cat /tmp/aws_credentials_available', returnStdout: true).trim()
+                    return status == 'true' 
+                }
+            }
+            steps {
+                script {
+                    echo "Checking ECS service status"
+                    withCredentials([[
+                        $class: 'UsernamePasswordMultiBinding',
+                        credentialsId: env.AWS_CREDENTIALS_ID,
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh '''
+                            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+                            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+                            aws configure set region ${AWS_REGION}
+                            
+                            echo "=== ECS SERVICE STATUS ==="
+                            aws ecs describe-services \
+                                --cluster ${ECS_CLUSTER} \
+                                --services ${ECS_SERVICE} \
+                                --region ${AWS_REGION} \
+                                --query "services[0].status" \
+                                --output text || echo "Service may not exist"
+                            
+                            echo "=== ECS SERVICES LIST ==="
+                            aws ecs list-services --cluster ${ECS_CLUSTER} --region ${AWS_REGION}
                         '''
                     }
                 }
@@ -682,7 +757,7 @@ pipeline {
                                     --output text 2>/dev/null || echo "NOT_EXIST")
                                 
                                 if [ "$TASK_DEFINITION_STATUS" = "NOT_EXIST" ]; then
-                                    echo "ERROR: Task definition ${ECS_TASK_DINITION} does not exist"
+                                    echo "ERROR: Task definition ${ECS_TASK_DEFINITION} does not exist"
                                     exit 1
                                 fi
                                 
@@ -738,28 +813,6 @@ pipeline {
                                     --tasks $TASK_ARNS \
                                     --region ${AWS_REGION} \
                                     --query "tasks[].{arn:taskArn,lastStatus:lastStatus,healthStatus:healthStatus,stoppedReason:stoppedReason}"
-                                    
-                                # Get task logs for debugging
-                                for task_arn in $TASK_ARNS; do
-                                    echo "=== LOGS FOR TASK $task_arn ==="
-                                    # Get the task definition to find cloudwatch log group
-                                    TASK_DEFINITION_ARN=$(aws ecs describe-tasks \
-                                        --cluster ${ECS_CLUSTER} \
-                                        --tasks $task_arn \
-                                        --region ${AWS_REGION} \
-                                        --query "tasks[0].taskDefinitionArn" \
-                                        --output text)
-                                        
-                                    # Try to get logs from CloudWatch if configured
-                                    aws logs describe-log-streams \
-                                        --log-group-name "/ecs/${ECS_TASK_DEFINITION}" \
-                                        --region ${AWS_REGION} \
-                                        --query "logStreams[0].logStreamName" \
-                                        --output text | xargs -I {} aws logs get-log-events \
-                                        --log-group-name "/ecs/${ECS_TASK_DEFINITION}" \
-                                        --log-stream-name {} \
-                                        --region ${AWS_REGION} || echo "No CloudWatch logs available"
-                                done
                             fi
                             
                             # Get the public DNS of the load balancer
