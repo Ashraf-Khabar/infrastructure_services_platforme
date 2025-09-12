@@ -18,7 +18,11 @@ pipeline {
         ROBOT_REPORTS_DIR = "${WORKSPACE}/robot_reports"
         PROMETHEUS_PUSH_GATEWAY = 'http://prometheus.host.internal'
 
-        PYTHON_PACKAGE_VERSION = 'N/A' 
+        PYTHON_PACKAGE_VERSION = 'N/A'
+        
+        // Variables AWS
+        AWS_REGION = 'us-east-1'
+        TF_WORKING_DIR = "${WORKSPACE}/cloud_infrastructure"
     }
 
     stages {
@@ -56,6 +60,25 @@ pipeline {
                 }
                 stage('Prometheus Dependencies') {
                     steps { sh "${VENV_PATH}/bin/pip install prometheus-client" }
+                }
+                stage('Terraform Installation') {
+                    steps {
+                        sh """
+                            # Install Terraform
+                            sudo apt-get update -y
+                            sudo apt-get install -y unzip
+                            wget https://releases.hashicorp.com/terraform/1.5.0/terraform_1.5.0_linux_amd64.zip
+                            unzip terraform_1.5.0_linux_amd64.zip
+                            sudo mv terraform /usr/local/bin/
+                            terraform --version
+                            
+                            # Install AWS CLI
+                            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                            unzip awscliv2.zip
+                            sudo ./aws/install
+                            aws --version
+                        """
+                    }
                 }
             }
         }
@@ -225,12 +248,74 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 }
             }
         }
+
+        stage('Deploy to AWS') {
+            steps {
+                script {
+                    echo "🚀 Déploiement sur AWS..."
+                    
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'AWS_CREDENTIALS',
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh """
+                            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                            export AWS_REGION=${AWS_REGION}
+                            
+                            cd ${TF_WORKING_DIR}
+                            
+                            # Initialisation Terraform
+                            terraform init -input=false
+                            
+                            # Validation du plan
+                            terraform validate
+                            
+                            # Application de l'infrastructure
+                            terraform apply -auto-approve
+                            
+                            # Récupération de l'IP publique
+                            INSTANCE_IP=\$(terraform output -raw instance_public_ip)
+                            APP_URL=\$(terraform output -raw application_url)
+                            
+                            echo " Infrastructure AWS déployée avec succès"
+                            echo " URL de l'application: \$APP_URL"
+                            echo "  IP de l'instance: \$INSTANCE_IP"
+                            
+                            # Attente que l'application soit disponible
+                            echo " Attente du démarrage de l'application..."
+                            timeout 300 bash -c 'until curl -f http://\$INSTANCE_IP:5000/health; do sleep 10; done'
+                            
+                            echo " Application déployée et accessible sur: http://\$INSTANCE_IP:5000"
+                            
+                            # Test final de l'application
+                            curl -f http://\$INSTANCE_IP:5000/health
+                            echo " Déploiement AWS terminé avec succès!"
+                        """
+                    }
+                }
+            }
+            
+            post {
+                success {
+                    script {
+                        def instance_ip = sh(script: "cd ${TF_WORKING_DIR} && terraform output -raw instance_public_ip", returnStdout: true).trim()
+                        env.DEPLOYMENT_URL = "http://${instance_ip}:5000"
+                        echo "🌐 Application déployée: ${env.DEPLOYMENT_URL}"
+                    }
+                }
+            }
+        }
     }
 
     post {
         always {
             script {
                 BUILD_STATUS = currentBuild.currentResult
+                
+                // Nettoyage des processus
                 sh """
                     echo "Cleaning up processes..."
                     if [ -f ${API_PID_FILE} ]; then
@@ -252,7 +337,6 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     statusColor = '#dc3545'
                 }
 
-    
                 def emailTemplate = readFile(file: env.EMAIL_TEMPLATE_PATH)
 
                 def emailBody = emailTemplate
@@ -265,6 +349,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     .replace('${NEXUS_REPOSITORY}', env.NEXUS_REPOSITORY ?: 'N/A')
                     .replace('${PYTHON_PACKAGE_VERSION}', env.PYTHON_PACKAGE_VERSION ?: 'N/A')
                     .replace('${BUILD_URL}', env.BUILD_URL ?: 'N/A')
+                    .replace('${DEPLOYMENT_URL}', env.DEPLOYMENT_URL ?: 'N/A')
                     .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
 
                 emailext (
@@ -275,6 +360,33 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 )
             }
             cleanWs()
+        }
+        
+        success {
+            echo " Pipeline exécuté avec succès! Application déployée sur AWS"
+        }
+        
+        failure {
+            echo " Pipeline a échoué. Vérifiez les logs pour plus de détails."
+            
+            // Destruction de l'infrastructure en cas d'échec
+            script {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws_credentials',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh """
+                        export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                        export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                        export AWS_REGION=${AWS_REGION}
+                        
+                        cd ${TF_WORKING_DIR}
+                        terraform destroy -auto-approve || echo "Nettoyage AWS échoué"
+                    """
+                }
+            }
         }
     }
 }

@@ -1,0 +1,75 @@
+# Fichiers Terraform
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+*.terraform.lock.hcl
+
+# Répertoire .terraform
+.terraform/
+.terraform.lock.hcl
+
+# Fichiers de cache Terraform
+.terraform.tfstate.lock.info
+
+# Fichiers de plan Terraform
+*.tfplan
+plan.out
+terraform.tfplan
+
+# Fichiers de variables sensibles
+*.tfvars
+*.tfvars.json
+variables.tfvars
+terraform.tfvars
+
+# Fichiers de backup
+*.backup
+*.bak
+
+# Fichiers temporaires
+*.tmp
+*.temp
+
+# Fichiers de log
+*.log
+terraform.log
+
+# Fichiers IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Fichiers macOS
+.DS_Store
+
+# Fichiers Windows
+Thumbs.db
+
+# Fichiers de provisionnement temporaires
+*.pem
+*.key
+*.pub
+
+# Fichiers de sortie Terraform
+output/
+
+# Fichiers de modules téléchargés
+modules/
+
+# Fichiers de providers
+plugins/
+
+# Fichiers de lock
+.lock
+
+# Fichiers de cache
+.cache/
+
+# Fichiers de configuration locale
+.local/
+
+# Fichiers d'environnement
+.env
+.env.*
