@@ -23,6 +23,10 @@ pipeline {
         // Variables AWS
         AWS_REGION = 'us-east-1'
         TF_WORKING_DIR = "${WORKSPACE}/cloud_infrastructure"
+        
+        // Variables AWS (configurées dans Jenkins)
+        AWS_ACCESS_KEY = credentials('AWS_ACCESS_KEY_ID')
+        AWS_SECRET_KEY = credentials('AWS_SECRET_ACCESS_KEY')
     }
 
     stages {
@@ -84,7 +88,7 @@ pipeline {
                     steps { sh "${VENV_PATH}/bin/pip install -r ${APP_DIR}/api/requirements.txt" }
                 }
                 stage('Client Dependencies') {
-                    steps { sh "${VENV_PATH}/bin/pip install -r ${APP_DIR}/client/requirements.txt" }
+                    steps { sh "${VENV_PATH/bin/pip install -r ${APP_DIR}/client/requirements.txt" }
                 }
                 stage('Test Dependencies') {
                     steps { sh "${VENV_PATH}/bin/pip install pytest requests" }
@@ -264,7 +268,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             ${VENV_PATH}/bin/twine upload \
                                 --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
                                 -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
-                                dist/* || echo "Nexus upload failed"
+                                dist\* || echo "Nexus upload failed"
                         """
                     }
                 }
@@ -276,16 +280,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 script {
                     echo "🚀 Déploiement sur AWS..."
                     
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-credentials',
-                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
+                    // Configuration simple des credentials AWS
+                    withEnv(["AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY}", "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY}"]) {
                         sh """
-                            # Configuration des credentials AWS
-                            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
                             export AWS_REGION=${AWS_REGION}
                             
                             # Vérification de la connexion AWS
@@ -302,12 +299,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             echo "Validation de la configuration Terraform..."
                             terraform validate
                             
-                            # Plan et application de l'infrastructure
-                            echo "Création du plan d'infrastructure..."
-                            terraform plan -out=tfplan
-                            
+                            # Application de l'infrastructure
                             echo "Application de l'infrastructure..."
-                            terraform apply -auto-approve tfplan
+                            terraform apply -auto-approve
                             
                             # Récupération des outputs
                             INSTANCE_IP=\$(terraform output -raw instance_public_ip)
@@ -406,15 +400,8 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             // Destruction de l'infrastructure en cas d'échec
             script {
                 catchError {
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'AWS_CREDENTIALS',
-                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
+                    withEnv(["AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY}", "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY}"]) {
                         sh """
-                            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
                             export AWS_REGION=${AWS_REGION}
                             
                             cd ${TF_WORKING_DIR}
