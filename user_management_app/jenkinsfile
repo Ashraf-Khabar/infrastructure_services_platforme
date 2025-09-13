@@ -88,7 +88,7 @@ pipeline {
                     steps { sh "${VENV_PATH}/bin/pip install -r ${APP_DIR}/api/requirements.txt" }
                 }
                 stage('Client Dependencies') {
-                    steps { sh "${VENV_PATH/bin/pip install -r ${APP_DIR}/client/requirements.txt" }
+                    steps { sh "${VENV_PATH}/bin/pip install -r ${APP_DIR}/client/requirements.txt" }
                 }
                 stage('Test Dependencies') {
                     steps { sh "${VENV_PATH}/bin/pip install pytest requests" }
@@ -265,10 +265,11 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         sh """
                             cd ${APP_DIR}
                             ${VENV_PATH}/bin/pip install twine
+                            # Upload des fichiers spécifiques au lieu de dist/*
                             ${VENV_PATH}/bin/twine upload \
                                 --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
                                 -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
-                                dist\* || echo "Nexus upload failed"
+                                dist/user_management_app-*.tar.gz dist/user_management_app-*.whl || echo "Nexus upload failed"
                         """
                     }
                 }
