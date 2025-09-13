@@ -161,7 +161,7 @@ pipeline {
                     sh """
                         cd ${TF_WORKING_DIR}
                         
-                        # Supprimer le fichier outputs.tf s'il existe pour éviter les doublons
+                        # Solution 1: Supprimer outputs.tf s'il existe
                         if [ -f outputs.tf ]; then
                             echo "Suppression du fichier outputs.tf en double..."
                             rm -f outputs.tf
@@ -169,9 +169,9 @@ pipeline {
                         fi
                         
                         # Vérification que main.tf contient les outputs
-                        if ! grep -q "output \\"instance_public_ip\\"" main.tf; then
-                            echo "Ajout des outputs manquants dans main.tf..."
-                            cat >> main.tf << 'EOL'
+                        if ! grep -q "output.*instance_public_ip" main.tf; then
+                            echo "⚠️  Ajout des outputs manquants dans main.tf..."
+                            cat >> main.tf << 'EOF'
 # Outputs
 output "instance_public_ip" {
   description = "Public IP address of the EC2 instance"
@@ -197,11 +197,11 @@ output "subnet_id" {
   description = "ID of the subnet used"
   value       = data.aws_subnet.selected.id
 }
-EOL
+EOF
                         fi
                         
                         echo "Vérification de la configuration Terraform..."
-                        terraform validate || echo "Validation échouée, continuation quand même"
+                        terraform validate || echo "Validation échouée, continuation..."
                     """
                 }
             }
@@ -223,7 +223,7 @@ EOL
                         sh """
                             ${VENV_PATH}/bin/pip install robotframework
                             ${VENV_PATH}/bin/pip install robotframework-requests
-                            ${VENX_PATH}/bin/pip install robotframework-databaselibrary
+                            ${VENV_PATH}/bin/pip install robotframework-databaselibrary
                             ${VENV_PATH}/bin/pip install psycopg2-binary
                         """
                     }
@@ -249,7 +249,7 @@ EOL
                         waitUntil {
                             try {
                                 sh """
-                                    curl -s -f http://localhost:5000/health > /dev/null && \\
+                                    curl -s -f http://localhost:5000/health > /dev/null && \
                                     curl -s -f http://localhost:5000/ > /dev/null
                                 """
                                 echo "API is ready and responding!"
@@ -283,12 +283,12 @@ EOL
                                 mkdir -p ${ROBOT_REPORTS_DIR}
                                 cd ${APP_DIR}/robot_tests
                                 set +e
-                                ${VENV_PATH}/bin/robot \\
-                                    --outputdir ${ROBOT_REPORTS_DIR} \\
-                                    --output output.xml \\
-                                    --report report.html \\
-                                    --log log.html \\
-                                    --xunit xunit.xml \\
+                                ${VENV_PATH}/bin/robot \
+                                    --outputdir ${ROBOT_REPORTS_DIR} \
+                                    --output output.xml \
+                                    --report report.html \
+                                    --log log.html \
+                                    --xunit xunit.xml \
                                     . || echo "Robot Framework tests finished with failures"
                                 set -e
                             """
@@ -391,9 +391,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             cd ${APP_DIR}
                             ${VENV_PATH}/bin/pip install twine
                             # Upload des fichiers spécifiques
-                            ${VENV_PATH}/bin/twine upload \\
-                                --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \\
-                                -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \\
+                            ${VENV_PATH}/bin/twine upload \
+                                --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
+                                -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
                                 dist/user_management_app-*.tar.gz dist/user_management_app-*.whl || echo "Nexus upload failed"
                         """
                     }
@@ -407,7 +407,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     echo "🚀 Déploiement sur AWS..."
                     
                     sh """
-                        cd ${TF_WORKING_DIR}
+                        cd "${TF_WORKING_DIR}"
                         
                         # Initialisation Terraform
                         echo "Initialisation de Terraform..."
@@ -464,6 +464,18 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     """
                 }
             }
+            
+            post {
+                success {
+                    script {
+                        def instance_ip = sh(script: "cd ${TF_WORKING_DIR} && terraform output -raw instance_public_ip", returnStdout: true).trim()
+                        env.DEPLOYMENT_URL = "http://${instance_ip}:5000"
+                        echo "🌐 Application déployée: ${env.DEPLOYMENT_URL}"
+                    }
+                }
+            }
+        }
+    }
 
     post {
         always {
@@ -515,14 +527,6 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 )
             }
             cleanWs()
-        }
-        
-        success {
-            echo "🎉 Pipeline exécuté avec succès! Application déployée sur AWS"
-        }
-        
-        failure {
-            echo "❌ Pipeline a échoué. Vérifiez les logs pour plus de détails."
         }
     }
 }
