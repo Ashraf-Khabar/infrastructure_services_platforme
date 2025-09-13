@@ -149,6 +149,30 @@ pipeline {
                                 aws ec2 delete-security-group --group-id \$sg_id || echo "Impossible de supprimer \$sg_id"
                             done
                         fi
+
+                        # Nettoyage des subnets (si vides)
+                        SUBNET_IDS=\$(aws ec2 describe-subnets \\
+                            --filters "Name=tag:Name,Values=user-management-public-subnet" \\
+                            --query "Subnets[].SubnetId" \\
+                            --output text)
+                        
+                        if [ -n "\$SUBNET_IDS" ]; then
+                            echo "Vérification des subnets à supprimer: \$SUBNET_IDS"
+                            for subnet_id in \$SUBNET_IDS; do
+                                # Vérifier si le subnet est vide
+                                INSTANCE_COUNT=\$(aws ec2 describe-instances \\
+                                    --filters "Name=subnet-id,Values=\$subnet_id" \\
+                                    --query "length(Reservations[].Instances[])" \\
+                                    --output text)
+                                
+                                if [ "\$INSTANCE_COUNT" -eq "0" ]; then
+                                    echo "Suppression du subnet vide: \$subnet_id"
+                                    aws ec2 delete-subnet --subnet-id \$subnet_id || echo "Impossible de supprimer \$subnet_id"
+                                else
+                                    echo "Subnet \$subnet_id non vide (\$INSTANCE_COUNT instances), conservation"
+                                fi
+                            done
+                        fi
                     """
                 }
             }
@@ -161,45 +185,47 @@ pipeline {
                     sh """
                         cd "${TF_WORKING_DIR}"
                         
-                        # Solution 1: Supprimer outputs.tf s'il existe
-                        if [ -f outputs.tf ]; then
-                            echo "Suppression du fichier outputs.tf en double..."
-                            rm -f outputs.tf
-                            echo "✅ Fichier outputs.tf supprimé"
-                        fi
+                        # Supprimer les outputs de main.tf s'ils existent
+                        echo "Nettoyage des outputs dans main.tf..."
+                        sed -i '/^output \".*\" {/,/^}$/d' main.tf || echo "Aucun output à supprimer dans main.tf"
                         
-                        # Vérification que main.tf contient les outputs
-                        if ! grep -q "output.*instance_public_ip" main.tf; then
-                            echo "⚠️  Ajout des outputs manquants dans main.tf..."
-                            cat >> main.tf << 'EOF'
-                        # Outputs
-                        output "instance_public_ip" {
-                        description = "Public IP address of the EC2 instance"
-                        value       = aws_eip.app.public_ip
-                        }
+                        # S'assurer que outputs.tf existe avec le bon contenu
+                        if [ ! -f outputs.tf ]; then
+                            echo "Création du fichier outputs.tf..."
+                            cat > outputs.tf << 'EOF'
+output "instance_public_ip" {
+  description = "Public IP address of the EC2 instance"
+  value       = aws_eip.app.public_ip
+}
 
-                        output "application_url" {
-                        description = "URL of the deployed application"
-                        value       = "http://\${aws_eip.app.public_ip}:5000"
-                        }
+output "application_url" {
+  description = "URL of the deployed application"
+  value       = "http://\${aws_eip.app.public_ip}:5000"
+}
 
-                        output "ssh_connection_command" {
-                        description = "SSH connection command"
-                        value       = "ssh -i ~/.ssh/id_rsa ubuntu@\${aws_eip.app.public_ip}"
-                        }
+output "ssh_connection_command" {
+  description = "SSH connection command"
+  value       = "ssh -i ~/.ssh/id_rsa ubuntu@\${aws_eip.app.public_ip}"
+}
 
-                        output "vpc_id" {
-                        description = "ID of the VPC used"
-                        value       = data.aws_vpc.existing.id
-                        }
+output "vpc_id" {
+  description = "ID of the VPC used"
+  value       = data.aws_vpc.existing.id
+}
 
-                        output "subnet_id" {
-                        description = "ID of the subnet used"
-                        value       = data.aws_subnet.selected.id
-                        }
-                        EOF
+output "subnet_id" {
+  description = "ID of the subnet used"
+  value       = aws_subnet.public.id
+}
+EOF
+                        else
+                            echo "✅ Fichier outputs.tf existe déjà"
                         fi
-                        
+
+                        # Correction du CIDR du subnet pour éviter les conflits
+                        echo "🔧 Correction du CIDR du subnet pour éviter les conflits..."
+                        sed -i 's|10.0.1.0/24|10.0.2.0/24|' main.tf || echo "Modification CIDR échouée, continuation..."
+
                         # Ré-initialisation Terraform après modification
                         echo "Ré-initialisation de Terraform..."
                         terraform init -input=false
@@ -531,6 +557,14 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 )
             }
             cleanWs()
+        }
+        
+        success {
+            echo "🎉 Pipeline exécuté avec succès! Application déployée sur AWS"
+        }
+        
+        failure {
+            echo "❌ Pipeline a échoué. Vérifiez les logs pour plus de détails."
         }
     }
 }
