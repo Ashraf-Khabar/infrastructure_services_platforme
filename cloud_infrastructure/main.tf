@@ -130,7 +130,7 @@ resource "aws_eip" "app" {
 # Clé SSH
 resource "aws_key_pair" "deployer" {
   key_name   = "deployer-key"
-  public_key = file("~/.ssh/id_rsa.pub")
+  public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC2nfYVwDi6UGjF3puO2hN2Sb6UU430eVzYMVkFztss5YV/lAJCdp+iaYTC5gncIa+ICiWZ4ghA1OEzQiBWkpGZkIE3pBJr3B6YTIKl6C/utUOvU/alrJUQybayRlO6mUUUdmu6UISFTOAHMmJLf6f2taKqg12WJPOZtmfPq4fRtnuAMWSG4BDLQIso/IK7Pq0nu/pdwiTtje9bWJs88u58LWZZbTU037tF/MGFbDsEyqBJMZqOhgUc/LEcstS+v8eMp9mAtwxhm3AGWmOCc840eL0QmZGn22+t18Ca7TtC/FS0aLQ7CX4zjXv6gCSQuJj5NuqyhPGR2AxdJ+3uWq12TEgLnqe9He3H5siYvFfGRAbft0OzHphDMPc7b99aRkAzVbIqW/wJBFLojJsxuG+KJHHO5F67enlzpR9IBfuz2Y6yCseV/64olnv6EgU2TvhsEcevfrwcO9O1Y1U/57DMfmLP/OjlRaGd+wKnIgykmL3VEP4uQeTr4o91N5UNSdBmQ1HbkyNnp+36ZLnDoP6VC0pyDplj3AE3Kv0eOqljF60uBoSsPp+sOgfSbhYJeCDQ3RYrnwOJEWBlolD+JL2PXU/nJQAP3uOJX2JTqOO+2oCTGw6HOnJqewgHsK3cS0R/WuQN4/3Z34le/gVDYFS09Wo1+Dxb/cQft75dLES/5Q== khabarachraf@gmail.com"
 }
 
 # AMI Ubuntu
