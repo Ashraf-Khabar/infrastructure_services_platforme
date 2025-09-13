@@ -348,6 +348,29 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
         }
 
+        stage('Fix Terraform Configuration') {
+            steps {
+                script {
+                    echo "🔧 Correction de la configuration Terraform..."
+                    sh """
+                        cd ${TF_WORKING_DIR}
+                        
+                        # Solution 1: Supprimer outputs.tf s'il existe
+                        if [ -f outputs.tf ]; then
+                            echo "Suppression du fichier outputs.tf en double..."
+                            rm outputs.tf
+                        fi
+                        
+                        # Solution alternative: Supprimer les outputs de main.tf
+                        # sed -i '/^output \".*\" {/,/^}$/d' main.tf
+                        
+                        echo "Vérification de la configuration..."
+                        terraform validate
+                    """
+                }
+            }
+        }
+
         stage('Deploy to AWS') {
             steps {
                 script {
