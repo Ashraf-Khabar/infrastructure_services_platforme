@@ -20,5 +20,5 @@ output "vpc_id" {
 
 output "subnet_id" {
   description = "ID of the subnet used"
-  value       = data.aws_subnet.selected.id
+  value       = aws_subnet.public.id
 }
