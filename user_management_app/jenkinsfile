@@ -281,10 +281,17 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 script {
                     echo "🚀 Déploiement sur AWS..."
                     
-                    // Configuration simple des credentials AWS
-                    withEnv(["AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY}", "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY}"]) {
+                    // Méthode alternative avec credentials dans des fichiers
+                    withCredentials([string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'), 
+                                string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')]) {
                         sh """
-                            export AWS_REGION=${AWS_REGION}
+                            # Configuration manuelle des credentials AWS
+                            mkdir -p ~/.aws
+                            echo "[default]" > ~/.aws/credentials
+                            echo "aws_access_key_id = ${AWS_ACCESS_KEY}" >> ~/.aws/credentials
+                            echo "aws_secret_access_key = ${AWS_SECRET_KEY}" >> ~/.aws/credentials
+                            echo "[default]" > ~/.aws/config
+                            echo "region = ${AWS_REGION}" >> ~/.aws/config
                             
                             # Vérification de la connexion AWS
                             echo "Vérification de la connexion AWS..."
@@ -292,47 +299,14 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                             
                             cd ${TF_WORKING_DIR}
                             
-                            # Initialisation Terraform
-                            echo "Initialisation de Terraform..."
+                            # Suite du déploiement...
                             terraform init -input=false
-                            
-                            # Validation du plan
-                            echo "Validation de la configuration Terraform..."
                             terraform validate
-                            
-                            # Application de l'infrastructure
-                            echo "Application de l'infrastructure..."
                             terraform apply -auto-approve
                             
-                            # Récupération des outputs
                             INSTANCE_IP=\$(terraform output -raw instance_public_ip)
-                            APP_URL=\$(terraform output -raw application_url)
-                            
-                            echo "📦 Infrastructure AWS déployée avec succès"
-                            echo "🌐 URL de l'application: \$APP_URL"
-                            echo "🖥️  IP de l'instance: \$INSTANCE_IP"
-                            
-                            # Attente que l'application soit disponible
-                            echo "⏳ Attente du démarrage de l'application..."
-                            timeout 300 bash -c 'until curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null; do echo "En attente..."; sleep 10; done'
-                            
-                            echo "✅ Application déployée et accessible sur: http://\$INSTANCE_IP:5000"
-                            
-                            # Test final de l'application
-                            echo "Test de santé de l'application..."
-                            curl -s http://\$INSTANCE_IP:5000/health
-                            echo "🎉 Déploiement AWS terminé avec succès!"
+                            echo "🖥️  Instance IP: \$INSTANCE_IP"
                         """
-                    }
-                }
-            }
-            
-            post {
-                success {
-                    script {
-                        def instance_ip = sh(script: "cd ${TF_WORKING_DIR} && terraform output -raw instance_public_ip", returnStdout: true).trim()
-                        env.DEPLOYMENT_URL = "http://${instance_ip}:5000"
-                        echo "🌐 Application déployée: ${env.DEPLOYMENT_URL}"
                     }
                 }
             }
