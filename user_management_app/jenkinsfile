@@ -37,6 +37,47 @@ pipeline {
             }
         }
 
+        stage('Vérification des Outils') {
+            parallel {
+                stage('Check AWS CLI') {
+                    steps {
+                        script {
+                            echo "Vérification d'AWS CLI..."
+                            def awsCliCheck = sh(script: 'which aws || echo "NOT_FOUND"', returnStdout: true).trim()
+                            if (awsCliCheck == "NOT_FOUND") {
+                                error "AWS CLI n'est pas installé. Veuillez l'installer sur l'agent Jenkins."
+                            } else {
+                                sh 'aws --version'
+                                echo "✅ AWS CLI est installé"
+                            }
+                        }
+                    }
+                }
+                stage('Check Terraform') {
+                    steps {
+                        script {
+                            echo "Vérification de Terraform..."
+                            def terraformCheck = sh(script: 'which terraform || echo "NOT_FOUND"', returnStdout: true).trim()
+                            if (terraformCheck == "NOT_FOUND") {
+                                echo "Installation de Terraform..."
+                                sh """
+                                    sudo apt-get update -y
+                                    sudo apt-get install -y unzip
+                                    wget https://releases.hashicorp.com/terraform/1.5.0/terraform_1.5.0_linux_amd64.zip
+                                    unzip terraform_1.5.0_linux_amd64.zip
+                                    sudo mv terraform /usr/local/bin/
+                                    terraform --version
+                                """
+                            } else {
+                                sh 'terraform --version'
+                                echo "✅ Terraform est installé"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         stage('Install Dependencies') {
             parallel {
                 stage('API Dependencies') {
@@ -60,25 +101,6 @@ pipeline {
                 }
                 stage('Prometheus Dependencies') {
                     steps { sh "${VENV_PATH}/bin/pip install prometheus-client" }
-                }
-                stage('Terraform Installation') {
-                    steps {
-                        sh """
-                            # Install Terraform
-                            sudo apt-get update -y
-                            sudo apt-get install -y unzip
-                            wget https://releases.hashicorp.com/terraform/1.5.0/terraform_1.5.0_linux_amd64.zip
-                            unzip terraform_1.5.0_linux_amd64.zip
-                            sudo mv terraform /usr/local/bin/
-                            terraform --version
-                            
-                            # Install AWS CLI
-                            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                            unzip awscliv2.zip
-                            sudo ./aws/install
-                            aws --version
-                        """
-                    }
                 }
             }
         }
@@ -256,43 +278,55 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     
                     withCredentials([[
                         $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'AWS_CREDENTIALS',
+                        credentialsId: 'aws-credentials',
                         accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                         secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
                         sh """
+                            # Configuration des credentials AWS
                             export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
                             export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
                             export AWS_REGION=${AWS_REGION}
                             
+                            # Vérification de la connexion AWS
+                            echo "Vérification de la connexion AWS..."
+                            aws sts get-caller-identity
+                            
                             cd ${TF_WORKING_DIR}
                             
                             # Initialisation Terraform
+                            echo "Initialisation de Terraform..."
                             terraform init -input=false
                             
                             # Validation du plan
+                            echo "Validation de la configuration Terraform..."
                             terraform validate
                             
-                            # Application de l'infrastructure
-                            terraform apply -auto-approve
+                            # Plan et application de l'infrastructure
+                            echo "Création du plan d'infrastructure..."
+                            terraform plan -out=tfplan
                             
-                            # Récupération de l'IP publique
+                            echo "Application de l'infrastructure..."
+                            terraform apply -auto-approve tfplan
+                            
+                            # Récupération des outputs
                             INSTANCE_IP=\$(terraform output -raw instance_public_ip)
                             APP_URL=\$(terraform output -raw application_url)
                             
-                            echo " Infrastructure AWS déployée avec succès"
-                            echo " URL de l'application: \$APP_URL"
-                            echo "  IP de l'instance: \$INSTANCE_IP"
+                            echo "📦 Infrastructure AWS déployée avec succès"
+                            echo "🌐 URL de l'application: \$APP_URL"
+                            echo "🖥️  IP de l'instance: \$INSTANCE_IP"
                             
                             # Attente que l'application soit disponible
-                            echo " Attente du démarrage de l'application..."
-                            timeout 300 bash -c 'until curl -f http://\$INSTANCE_IP:5000/health; do sleep 10; done'
+                            echo "⏳ Attente du démarrage de l'application..."
+                            timeout 300 bash -c 'until curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null; do echo "En attente..."; sleep 10; done'
                             
-                            echo " Application déployée et accessible sur: http://\$INSTANCE_IP:5000"
+                            echo "✅ Application déployée et accessible sur: http://\$INSTANCE_IP:5000"
                             
                             # Test final de l'application
-                            curl -f http://\$INSTANCE_IP:5000/health
-                            echo " Déploiement AWS terminé avec succès!"
+                            echo "Test de santé de l'application..."
+                            curl -s http://\$INSTANCE_IP:5000/health
+                            echo "🎉 Déploiement AWS terminé avec succès!"
                         """
                     }
                 }
@@ -363,28 +397,31 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
         }
         
         success {
-            echo " Pipeline exécuté avec succès! Application déployée sur AWS"
+            echo "🎉 Pipeline exécuté avec succès! Application déployée sur AWS"
         }
         
         failure {
-            echo " Pipeline a échoué. Vérifiez les logs pour plus de détails."
+            echo "❌ Pipeline a échoué. Vérifiez les logs pour plus de détails."
             
             // Destruction de l'infrastructure en cas d'échec
             script {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws_credentials',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    sh """
-                        export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                        export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-                        export AWS_REGION=${AWS_REGION}
-                        
-                        cd ${TF_WORKING_DIR}
-                        terraform destroy -auto-approve || echo "Nettoyage AWS échoué"
-                    """
+                catchError {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'AWS_CREDENTIALS',
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh """
+                            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                            export AWS_REGION=${AWS_REGION}
+                            
+                            cd ${TF_WORKING_DIR}
+                            echo "Nettoyage de l'infrastructure AWS..."
+                            terraform destroy -auto-approve || echo "Nettoyage AWS échoué ou non nécessaire"
+                        """
+                    }
                 }
             }
         }
