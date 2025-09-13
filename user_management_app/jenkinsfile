@@ -88,11 +88,66 @@ pipeline {
                         if aws sts get-caller-identity; then
                             echo "✅ Configuration AWS valide détectée"
                         else
-                            echo "⚠️  Aucune configuration AWS valide trouvée"
-                            echo "Veuillez configurer AWS CLI sur l'agent avec les commandes:"
+                            echo "❌ ERREUR: Configuration AWS invalide"
+                            echo "Veuillez configurer AWS CLI sur l'agent Jenkins avec:"
                             echo "aws configure set aws_access_key_id VOTRE_ACCESS_KEY"
                             echo "aws configure set aws_secret_access_key VOTRE_SECRET_KEY"
                             echo "aws configure set region us-east-1"
+                            exit 1
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('Nettoyage des Ressources Existantes') {
+            steps {
+                script {
+                    echo "🧹 Nettoyage des anciennes ressources..."
+                    sh """
+                        # Suppression des anciennes clés SSH pour éviter les conflits
+                        aws ec2 describe-key-pairs --query 'KeyPairs[?starts_with(KeyName, \\`user-management-deployer-key-\\`)].KeyName' --output text | while read key_name; do
+                            echo "Suppression de la clé: \$key_name"
+                            aws ec2 delete-key-pair --key-name "\$key_name" || echo "Impossible de supprimer \$key_name"
+                        done
+
+                        # Nettoyage des anciennes instances
+                        INSTANCE_IDS=\$(aws ec2 describe-instances \
+                            --filters "Name=tag:Name,Values=user-management-app" \
+                            --query "Reservations[].Instances[].InstanceId" \
+                            --output text)
+                        
+                        if [ -n "\$INSTANCE_IDS" ]; then
+                            echo "Suppression des anciennes instances: \$INSTANCE_IDS"
+                            aws ec2 terminate-instances --instance-ids \$INSTANCE_IDS
+                            echo "Attente de la suppression des instances..."
+                            aws ec2 wait instance-terminated --instance-ids \$INSTANCE_IDS
+                        fi
+
+                        # Nettoyage des Elastic IPs non associées
+                        EIP_ALLOCATIONS=\$(aws ec2 describe-addresses \
+                            --filters "Name=tag:Name,Values=user-management-eip" \
+                            --query "Addresses[].AllocationId" \
+                            --output text)
+                        
+                        if [ -n "\$EIP_ALLOCATIONS" ]; then
+                            echo "Suppression des Elastic IPs: \$EIP_ALLOCATIONS"
+                            for allocation in \$EIP_ALLOCATIONS; do
+                                aws ec2 release-address --allocation-id \$allocation || echo "Impossible de supprimer \$allocation"
+                            done
+                        fi
+
+                        # Nettoyage des Security Groups
+                        SG_IDS=\$(aws ec2 describe-security-groups \
+                            --filters "Name=group-name,Values=user-management-sg" \
+                            --query "SecurityGroups[].GroupId" \
+                            --output text)
+                        
+                        if [ -n "\$SG_IDS" ]; then
+                            echo "Suppression des Security Groups: \$SG_IDS"
+                            for sg_id in \$SG_IDS; do
+                                aws ec2 delete-security-group --group-id \$sg_id || echo "Impossible de supprimer \$sg_id"
+                            done
                         fi
                     """
                 }
@@ -299,24 +354,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     echo "🚀 Déploiement sur AWS..."
                     
                     sh """
-                        # Vérification finale de la configuration AWS
-                        echo "Vérification de la configuration AWS..."
-                        if ! aws sts get-caller-identity; then
-                            echo "❌ ERREUR: Configuration AWS invalide"
-                            echo "Veuillez configurer AWS CLI sur l'agent Jenkins avec:"
-                            echo "aws configure set aws_access_key_id VOTRE_ACCESS_KEY"
-                            echo "aws configure set aws_secret_access_key VOTRE_SECRET_KEY"
-                            echo "aws configure set region us-east-1"
-                            echo "Puis testez avec: aws sts get-caller-identity"
-                            exit 1
-                        fi
-
                         cd ${TF_WORKING_DIR}
-                        
-                        # Correction de la référence à la clé SSH dans le fichier Terraform
-                        echo "Correction de la configuration Terraform..."
-                        SSH_PUB_KEY=\$(cat ~/.ssh/id_rsa.pub)
-                        sed -i "s|file(\\"~/.ssh/id_rsa.pub\\")|\\"\$SSH_PUB_KEY\\"|" main.tf
                         
                         # Initialisation Terraform
                         echo "Initialisation de Terraform..."
@@ -324,13 +362,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         
                         # Validation du plan
                         echo "Validation de la configuration Terraform..."
-                        if ! terraform validate; then
-                            echo "❌ Validation Terraform échouée"
-                            echo "Correction manuelle de la clé SSH..."
-                            # Solution alternative - modification manuelle du main.tf
-                            sed -i 's|file(.*id_rsa.pub.*)|"'\$SSH_PUB_KEY'"|' main.tf
-                            terraform validate || echo "Validation toujours en échec après correction"
-                        fi
+                        terraform validate
                         
                         # Plan d'infrastructure
                         echo "Création du plan d'infrastructure..."
@@ -341,21 +373,40 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         terraform apply -auto-approve tfplan
                         
                         # Récupération des outputs
-                        INSTANCE_IP=\$(terraform output -raw instance_public_ip 2>/dev/null || echo "NON_DISPONIBLE")
+                        INSTANCE_IP=\$(terraform output -raw instance_public_ip)
+                        APP_URL=\$(terraform output -raw application_url)
                         
-                        if [ "\$INSTANCE_IP" != "NON_DISPONIBLE" ]; then
-                            echo "📦 Infrastructure AWS déployée avec succès"
-                            echo "🖥️  IP de l'instance: \$INSTANCE_IP"
-                            echo "🌐 URL de l'application: http://\$INSTANCE_IP:5000"
-                            
-                            # Attente que l'application soit disponible
-                            echo "⏳ Attente du démarrage de l'application..."
-                            timeout 180 bash -c 'until curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null; do echo "En attente..."; sleep 10; done'
-                            
-                            echo "✅ Application déployée et accessible sur: http://\$INSTANCE_IP:5000"
+                        echo "📦 Infrastructure AWS déployée avec succès"
+                        echo "🖥️  IP de l'instance: \$INSTANCE_IP"
+                        echo "🌐 URL de l'application: \$APP_URL"
+                        
+                        # Attente que l'application soit disponible
+                        echo "⏳ Attente du démarrage de l'application (peut prendre plusieurs minutes)..."
+                        
+                        # Tentative de connexion avec gestion d'erreur
+                        COUNTER=0
+                        MAX_RETRIES=18 # 3 minutes max (18 * 10 secondes)
+                        while [ \$COUNTER -lt \$MAX_RETRIES ]; do
+                            if curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null; then
+                                echo "✅ Application disponible!"
+                                break
+                            else
+                                echo "En attente... (\$((COUNTER * 10)) secondes)"
+                                sleep 10
+                                COUNTER=\$((COUNTER + 1))
+                            fi
+                        done
+                        
+                        if [ \$COUNTER -eq \$MAX_RETRIES ]; then
+                            echo "⚠️  L'application ne répond pas après 3 minutes"
+                            echo "Cela peut être normal si le déploiement est encore en cours"
+                            echo "Vérifiez manuellement plus tard: http://\$INSTANCE_IP:5000/health"
                         else
-                            echo "⚠️  Impossible de récupérer l'IP de l'instance"
-                            echo "Vérifiez manuellement l'état de l'infrastructure"
+                            echo "✅ Application déployée et accessible sur: http://\$INSTANCE_IP:5000"
+                            # Test final de l'application
+                            echo "Test de santé de l'application..."
+                            curl -s http://\$INSTANCE_IP:5000/health
+                            echo "🎉 Déploiement AWS terminé avec succès!"
                         fi
                     """
                 }
@@ -364,15 +415,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             post {
                 success {
                     script {
-                        try {
-                            def instance_ip = sh(script: "cd ${TF_WORKING_DIR} && terraform output -raw instance_public_ip 2>/dev/null || echo 'NON_DISPONIBLE'", returnStdout: true).trim()
-                            if (instance_ip != "NON_DISPONIBLE") {
-                                env.DEPLOYMENT_URL = "http://${instance_ip}:5000"
-                                echo "🌐 Application déployée: ${env.DEPLOYMENT_URL}"
-                            }
-                        } catch (Exception e) {
-                            echo "⚠️  Impossible de récupérer l'URL de déploiement"
-                        }
+                        def instance_ip = sh(script: "cd ${TF_WORKING_DIR} && terraform output -raw instance_public_ip", returnStdout: true).trim()
+                        env.DEPLOYMENT_URL = "http://${instance_ip}:5000"
+                        echo "🌐 Application déployée: ${env.DEPLOYMENT_URL}"
                     }
                 }
             }

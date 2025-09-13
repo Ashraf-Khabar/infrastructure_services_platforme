@@ -7,3 +7,8 @@ output "application_url" {
   description = "URL of the deployed application"
   value       = "http://${aws_eip.app.public_ip}:5000"
 }
+
+output "ssh_connection_command" {
+  description = "SSH connection command"
+  value       = "ssh -i ~/.ssh/id_rsa ubuntu@${aws_eip.app.public_ip}"
+}

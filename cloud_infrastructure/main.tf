@@ -11,67 +11,53 @@ provider "aws" {
   region = var.aws_region
 }
 
-# VPC très simple
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_support   = true
-  enable_dns_hostnames = true
+# Utilisation d'une VPC existante au lieu d'en créer une nouvelle
+data "aws_vpc" "existing" {
+  default = true  # Utilise la VPC par défaut
+}
 
-  tags = {
-    Name = "user-management-vpc"
+# Utilisation d'un subnet existant dans la VPC par défaut
+data "aws_subnets" "existing" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.existing.id]
   }
 }
 
-# Subnet public
-resource "aws_subnet" "public" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.1.0/24"
-  availability_zone = "${var.aws_region}a"
+data "aws_subnet" "selected" {
+  id = element(data.aws_subnets.existing.ids, 0)
+}
 
-  tags = {
-    Name = "user-management-public-subnet"
+# Internet Gateway existant (généralement déjà présent dans la VPC par défaut)
+data "aws_internet_gateway" "existing" {
+  filter {
+    name   = "attachment.vpc-id"
+    values = [data.aws_vpc.existing.id]
   }
 }
 
-# Internet Gateway
-resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
-
-  tags = {
-    Name = "user-management-igw"
+# Route table existante
+data "aws_route_table" "existing" {
+  vpc_id = data.aws_vpc.existing.id
+  
+  filter {
+    name   = "association.main"
+    values = ["true"]
   }
-}
-
-# Route table publique
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.main.id
-  }
-
-  tags = {
-    Name = "user-management-public-rt"
-  }
-}
-
-resource "aws_route_table_association" "public" {
-  subnet_id      = aws_subnet.public.id
-  route_table_id = aws_route_table.public.id
 }
 
 # Groupe de sécurité
 resource "aws_security_group" "app" {
   name        = "user-management-sg"
   description = "Security group for user management app"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = data.aws_vpc.existing.id
 
   ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "SSH access"
   }
 
   ingress {
@@ -79,6 +65,7 @@ resource "aws_security_group" "app" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP access"
   }
 
   ingress {
@@ -86,6 +73,7 @@ resource "aws_security_group" "app" {
     to_port     = 5000
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "App API access"
   }
 
   egress {
@@ -93,6 +81,7 @@ resource "aws_security_group" "app" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
   }
 
   tags = {
@@ -100,11 +89,21 @@ resource "aws_security_group" "app" {
   }
 }
 
+# Clé SSH avec nom unique pour éviter les conflits
+resource "aws_key_pair" "deployer" {
+  key_name   = "user-management-deployer-key-${formatdate("YYYYMMDD", timestamp())}"
+  public_key = file("~/.ssh/id_rsa.pub")
+
+  tags = {
+    Name = "user-management-deployer-key"
+  }
+}
+
 # Instance EC2
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
-  subnet_id              = aws_subnet.public.id
+  subnet_id              = data.aws_subnet.selected.id
   vpc_security_group_ids = [aws_security_group.app.id]
   key_name               = aws_key_pair.deployer.key_name
 
@@ -115,9 +114,12 @@ resource "aws_instance" "app" {
   tags = {
     Name = "user-management-app"
   }
+
+  # Assure que l'IP publique est assignée
+  associate_public_ip_address = true
 }
 
-# Adresse IP élastique
+# Adresse IP élastique (optionnel - seulement si besoin d'IP fixe)
 resource "aws_eip" "app" {
   instance = aws_instance.app.id
   vpc      = true
@@ -127,19 +129,18 @@ resource "aws_eip" "app" {
   }
 }
 
-# Clé SSH
-resource "aws_key_pair" "deployer" {
-  key_name   = "deployer-key"
-  public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC2nfYVwDi6UGjF3puO2hN2Sb6UU430eVzYMVkFztss5YV/lAJCdp+iaYTC5gncIa+ICiWZ4ghA1OEzQiBWkpGZkIE3pBJr3B6YTIKl6C/utUOvU/alrJUQybayRlO6mUUUdmu6UISFTOAHMmJLf6f2taKqg12WJPOZtmfPq4fRtnuAMWSG4BDLQIso/IK7Pq0nu/pdwiTtje9bWJs88u58LWZZbTU037tF/MGFbDsEyqBJMZqOhgUc/LEcstS+v8eMp9mAtwxhm3AGWmOCc840eL0QmZGn22+t18Ca7TtC/FS0aLQ7CX4zjXv6gCSQuJj5NuqyhPGR2AxdJ+3uWq12TEgLnqe9He3H5siYvFfGRAbft0OzHphDMPc7b99aRkAzVbIqW/wJBFLojJsxuG+KJHHO5F67enlzpR9IBfuz2Y6yCseV/64olnv6EgU2TvhsEcevfrwcO9O1Y1U/57DMfmLP/OjlRaGd+wKnIgykmL3VEP4uQeTr4o91N5UNSdBmQ1HbkyNnp+36ZLnDoP6VC0pyDplj3AE3Kv0eOqljF60uBoSsPp+sOgfSbhYJeCDQ3RYrnwOJEWBlolD+JL2PXU/nJQAP3uOJX2JTqOO+2oCTGw6HOnJqewgHsK3cS0R/WuQN4/3Z34le/gVDYFS09Wo1+Dxb/cQft75dLES/5Q== khabarachraf@gmail.com"
-}
-
 # AMI Ubuntu
 data "aws_ami" "ubuntu" {
   most_recent = true
 
   filter {
     name   = "name"
-    values = ["ubuntu*22.04*"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-22.04-*-amd64-server-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
   }
 
   filter {
@@ -147,5 +148,36 @@ data "aws_ami" "ubuntu" {
     values = ["x86_64"]
   }
 
-  owners = ["099720109477"]
+  owners = ["099720109477"] # Canonical
+}
+
+# Outputs
+output "instance_public_ip" {
+  description = "Public IP address of the EC2 instance"
+  value       = aws_eip.app.public_ip
+}
+
+output "instance_private_ip" {
+  description = "Private IP address of the EC2 instance"
+  value       = aws_instance.app.private_ip
+}
+
+output "application_url" {
+  description = "URL of the deployed application"
+  value       = "http://${aws_eip.app.public_ip}:5000"
+}
+
+output "ssh_connection_command" {
+  description = "SSH connection command"
+  value       = "ssh -i ~/.ssh/id_rsa ubuntu@${aws_eip.app.public_ip}"
+}
+
+output "vpc_id" {
+  description = "ID of the VPC used"
+  value       = data.aws_vpc.existing.id
+}
+
+output "subnet_id" {
+  description = "ID of the subnet used"
+  value       = data.aws_subnet.selected.id
 }
