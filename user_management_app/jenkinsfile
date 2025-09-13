@@ -23,10 +23,6 @@ pipeline {
         // Variables AWS
         AWS_REGION = 'us-east-1'
         TF_WORKING_DIR = "${WORKSPACE}/cloud_infrastructure"
-        
-        // Variables AWS (configurées dans Jenkins)
-        AWS_ACCESS_KEY = credentials('AWS_ACCESS_KEY_ID')
-        AWS_SECRET_KEY = credentials('AWS_SECRET_ACCESS_KEY')
     }
 
     stages {
@@ -41,43 +37,40 @@ pipeline {
             }
         }
 
-        stage('Vérification des Outils') {
-            parallel {
-                stage('Check AWS CLI') {
-                    steps {
-                        script {
-                            echo "Vérification d'AWS CLI..."
-                            def awsCliCheck = sh(script: 'which aws || echo "NOT_FOUND"', returnStdout: true).trim()
-                            if (awsCliCheck == "NOT_FOUND") {
-                                error "AWS CLI n'est pas installé. Veuillez l'installer sur l'agent Jenkins."
-                            } else {
-                                sh 'aws --version'
-                                echo "✅ AWS CLI est installé"
-                            }
-                        }
+        stage('Vérification des Outils et Infrastructure') {
+            steps {
+                script {
+                    echo "Vérification d'AWS CLI..."
+                    def awsCliCheck = sh(script: 'which aws || echo "NOT_FOUND"', returnStdout: true).trim()
+                    if (awsCliCheck == "NOT_FOUND") {
+                        error "AWS CLI n'est pas installé. Veuillez l'installer sur l'agent Jenkins."
+                    } else {
+                        sh 'aws --version'
+                        echo "✅ AWS CLI est installé"
                     }
-                }
-                stage('Check Terraform') {
-                    steps {
-                        script {
-                            echo "Vérification de Terraform..."
-                            def terraformCheck = sh(script: 'which terraform || echo "NOT_FOUND"', returnStdout: true).trim()
-                            if (terraformCheck == "NOT_FOUND") {
-                                echo "Installation de Terraform..."
-                                sh """
-                                    sudo apt-get update -y
-                                    sudo apt-get install -y unzip
-                                    wget https://releases.hashicorp.com/terraform/1.5.0/terraform_1.5.0_linux_amd64.zip
-                                    unzip terraform_1.5.0_linux_amd64.zip
-                                    sudo mv terraform /usr/local/bin/
-                                    terraform --version
-                                """
-                            } else {
-                                sh 'terraform --version'
-                                echo "✅ Terraform est installé"
-                            }
-                        }
+
+                    echo "Vérification de Terraform..."
+                    def terraformCheck = sh(script: 'which terraform || echo "NOT_FOUND"', returnStdout: true).trim()
+                    if (terraformCheck == "NOT_FOUND") {
+                        echo "Installation de Terraform..."
+                        sh """
+                            sudo apt-get update -y
+                            sudo apt-get install -y unzip
+                            wget https://releases.hashicorp.com/terraform/1.5.0/terraform_1.5.0_linux_amd64.zip
+                            unzip terraform_1.5.0_linux_amd64.zip
+                            sudo mv terraform /usr/local/bin/
+                            terraform --version
+                        """
+                    } else {
+                        sh 'terraform --version'
+                        echo "✅ Terraform est installé"
                     }
+
+                    echo "Vérification du dossier d'infrastructure..."
+                    if (!fileExists(TF_WORKING_DIR)) {
+                        error "Le dossier d'infrastructure ${TF_WORKING_DIR} n'existe pas!"
+                    }
+                    sh "ls -la ${TF_WORKING_DIR}"
                 }
             }
         }
@@ -265,7 +258,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                         sh """
                             cd ${APP_DIR}
                             ${VENV_PATH}/bin/pip install twine
-                            # Upload des fichiers spécifiques au lieu de dist/*
+                            # Upload des fichiers spécifiques
                             ${VENV_PATH}/bin/twine upload \
                                 --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
                                 -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
@@ -281,33 +274,40 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 script {
                     echo "🚀 Déploiement sur AWS..."
                     
-                    // Méthode alternative avec credentials dans des fichiers
-                    withCredentials([string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'), 
-                                string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')]) {
-                        sh """
-                            # Configuration manuelle des credentials AWS
-                            mkdir -p ~/.aws
-                            echo "[default]" > ~/.aws/credentials
-                            echo "aws_access_key_id = ${AWS_ACCESS_KEY}" >> ~/.aws/credentials
-                            echo "aws_secret_access_key = ${AWS_SECRET_KEY}" >> ~/.aws/credentials
-                            echo "[default]" > ~/.aws/config
-                            echo "region = ${AWS_REGION}" >> ~/.aws/config
-                            
-                            # Vérification de la connexion AWS
-                            echo "Vérification de la connexion AWS..."
-                            aws sts get-caller-identity
-                            
-                            cd ${TF_WORKING_DIR}
-                            
-                            # Suite du déploiement...
-                            terraform init -input=false
-                            terraform validate
-                            terraform apply -auto-approve
-                            
-                            INSTANCE_IP=\$(terraform output -raw instance_public_ip)
-                            echo "🖥️  Instance IP: \$INSTANCE_IP"
-                        """
-                    }
+                    // Configuration manuelle des credentials AWS
+                    sh """
+                        # Configuration AWS
+                        mkdir -p ~/.aws
+                        echo "[default]" > ~/.aws/credentials
+                        echo "aws_access_key_id = ${env.AWS_ACCESS_KEY}" >> ~/.aws/credentials
+                        echo "aws_secret_access_key = ${env.AWS_SECRET_KEY}" >> ~/.aws/credentials
+                        echo "[default]" > ~/.aws/config
+                        echo "region = ${AWS_REGION}" >> ~/.aws/config
+                        
+                        # Vérification de la connexion AWS
+                        echo "Vérification de la connexion AWS..."
+                        aws sts get-caller-identity || echo "Erreur de connexion AWS"
+                        
+                        cd ${TF_WORKING_DIR}
+                        
+                        # Initialisation Terraform
+                        echo "Initialisation de Terraform..."
+                        terraform init -input=false
+                        
+                        # Validation du plan
+                        echo "Validation de la configuration Terraform..."
+                        terraform validate
+                        
+                        # Application de l'infrastructure
+                        echo "Application de l'infrastructure..."
+                        terraform apply -auto-approve
+                        
+                        # Récupération des outputs
+                        INSTANCE_IP=\$(terraform output -raw instance_public_ip)
+                        
+                        echo "📦 Infrastructure AWS déployée avec succès"
+                        echo "🖥️  IP de l'instance: \$INSTANCE_IP"
+                    """
                 }
             }
         }
@@ -316,7 +316,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
     post {
         always {
             script {
-                BUILD_STATUS = currentBuild.currentResult
+                def buildStatus = currentBuild.currentResult
                 
                 // Nettoyage des processus
                 sh """
@@ -332,9 +332,9 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                 """
 
                 def statusColor
-                if (BUILD_STATUS == 'SUCCESS') {
+                if (buildStatus == 'SUCCESS') {
                     statusColor = '#28a745'
-                } else if (BUILD_STATUS == 'UNSTABLE') {
+                } else if (buildStatus == 'UNSTABLE') {
                     statusColor = '#ffc107' 
                 } else {
                     statusColor = '#dc3545'
@@ -344,7 +344,7 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
 
                 def emailBody = emailTemplate
                     .replace('${STATUS_COLOR}', statusColor)
-                    .replace('${BUILD_STATUS}', BUILD_STATUS ?: 'UNKNOWN')
+                    .replace('${BUILD_STATUS}', buildStatus ?: 'UNKNOWN')
                     .replace('${JOB_NAME}', env.JOB_NAME ?: 'UNKNOWN')
                     .replace('${BUILD_NUMBER}', env.BUILD_NUMBER ?: '0')
                     .replace('${BUILD_DURATION}', currentBuild.durationString ?: '0s')
@@ -352,40 +352,16 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     .replace('${NEXUS_REPOSITORY}', env.NEXUS_REPOSITORY ?: 'N/A')
                     .replace('${PYTHON_PACKAGE_VERSION}', env.PYTHON_PACKAGE_VERSION ?: 'N/A')
                     .replace('${BUILD_URL}', env.BUILD_URL ?: 'N/A')
-                    .replace('${DEPLOYMENT_URL}', env.DEPLOYMENT_URL ?: 'N/A')
                     .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
 
                 emailext (
-                    subject: "Build ${BUILD_STATUS}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                    subject: "Build ${buildStatus}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
                     body: emailBody,
                     to: env.EMAIL_RECIPIENTS,
                     mimeType: 'text/html'
                 )
             }
             cleanWs()
-        }
-        
-        success {
-            echo "🎉 Pipeline exécuté avec succès! Application déployée sur AWS"
-        }
-        
-        failure {
-            echo "❌ Pipeline a échoué. Vérifiez les logs pour plus de détails."
-            
-            // Destruction de l'infrastructure en cas d'échec
-            script {
-                catchError {
-                    withEnv(["AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY}", "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY}"]) {
-                        sh """
-                            export AWS_REGION=${AWS_REGION}
-                            
-                            cd ${TF_WORKING_DIR}
-                            echo "Nettoyage de l'infrastructure AWS..."
-                            terraform destroy -auto-approve || echo "Nettoyage AWS échoué ou non nécessaire"
-                        """
-                    }
-                }
-            }
         }
     }
 }
