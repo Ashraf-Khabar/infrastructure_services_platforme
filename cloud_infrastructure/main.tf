@@ -16,6 +16,14 @@ data "aws_vpc" "existing" {
   id = "vpc-02346cf0516d0be84"  # Votre VPC ID
 }
 
+# Récupération de l'Internet Gateway existant
+data "aws_internet_gateway" "existing" {
+  filter {
+    name   = "attachment.vpc-id"
+    values = [data.aws_vpc.existing.id]
+  }
+}
+
 # AMI Ubuntu
 data "aws_ami" "ubuntu" {
   most_recent = true
@@ -49,14 +57,6 @@ resource "aws_subnet" "public" {
     Name = "user-management-public-subnet"
   }
 }
-# Internet Gateway
-resource "aws_internet_gateway" "igw" {
-  vpc_id = data.aws_vpc.existing.id
-
-  tags = {
-    Name = "user-management-igw"
-  }
-}
 
 # Route table
 resource "aws_route_table" "public" {
@@ -64,7 +64,7 @@ resource "aws_route_table" "public" {
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw.id
+    gateway_id = data.aws_internet_gateway.existing.id  # Utiliser l'IGW existant
   }
 
   tags = {
@@ -123,7 +123,7 @@ resource "aws_security_group" "app" {
 
 # Clé SSH
 resource "aws_key_pair" "deployer" {
-  key_name   = "user-management-deployer-key-${formatdate("YYYYMMDD", timestamp())}"
+  key_name   = "user-management-deployer-key-${formatdate("YYYYMMDD-hhmmss", timestamp())}"  # Nom unique avec timestamp
   public_key = file("~/.ssh/id_rsa.pub")
 
   tags = {

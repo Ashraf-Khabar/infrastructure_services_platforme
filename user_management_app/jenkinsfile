@@ -45,7 +45,7 @@ pipeline {
                         error "AWS CLI n'est pas installé. Veuillez l'installer sur l'agent Jenkins."
                     } else {
                         sh 'aws --version'
-                        echo "✅ AWS CLI est installé"
+                        echo " AWS CLI est installé"
                     }
 
                     echo "Vérification de Terraform..."
@@ -62,7 +62,7 @@ pipeline {
                         """
                     } else {
                         sh 'terraform --version'
-                        echo "✅ Terraform est installé"
+                        echo " Terraform est installé"
                     }
 
                     echo "Vérification du dossier d'infrastructure..."
@@ -86,9 +86,9 @@ pipeline {
                     sh """
                         # Test de la configuration AWS existante
                         if aws sts get-caller-identity; then
-                            echo "✅ Configuration AWS valide détectée"
+                            echo " Configuration AWS valide détectée"
                         else
-                            echo "❌ ERREUR: Configuration AWS invalide"
+                            echo " ERREUR: Configuration AWS invalide"
                             echo "Veuillez configurer AWS CLI sur l'agent Jenkins avec:"
                             echo "aws configure set aws_access_key_id VOTRE_ACCESS_KEY"
                             echo "aws configure set aws_secret_access_key VOTRE_SECRET_KEY"
@@ -103,7 +103,7 @@ pipeline {
         stage('Nettoyage des Ressources Existantes') {
             steps {
                 script {
-                    echo "🧹 Nettoyage des anciennes ressources..."
+                    echo " Nettoyage des anciennes ressources..."
                     sh """
                         # Suppression des anciennes clés SSH pour éviter les conflits
                         aws ec2 describe-key-pairs --query 'KeyPairs[?starts_with(KeyName, \\`user-management-deployer-key-\\`)].KeyName' --output text | while read key_name; do
@@ -220,11 +220,11 @@ output "subnet_id" {
 }
 EOF
                         else
-                            echo "✅ Fichier outputs.tf existe déjà"
+                            echo " Fichier outputs.tf existe déjà"
                         fi
 
                         # Correction du CIDR du subnet pour éviter les conflits
-                        echo "🔧 Correction du CIDR du subnet pour éviter les conflits..."
+                        echo " Correction du CIDR du subnet pour éviter les conflits..."
                         sed -i 's|10.0.1.0/24|10.0.2.0/24|' main.tf || echo "Modification CIDR échouée, continuation..."
 
                         # Ré-initialisation Terraform après modification
@@ -243,7 +243,7 @@ EOF
         stage('Deploy to AWS') {
             steps {
                 script {
-                    echo "🚀 Déploiement sur AWS..."
+                    echo " Déploiement sur AWS..."
                     
                     // CORRECTION ICI : Utilisation de simples quotes avec concaténation
                     sh '''
@@ -269,19 +269,19 @@ EOF
                         INSTANCE_IP=$(terraform output -raw instance_public_ip)
                         APP_URL=$(terraform output -raw application_url)
                         
-                        echo "📦 Infrastructure AWS déployée avec succès"
-                        echo "🖥️  IP de l'instance: $INSTANCE_IP"
-                        echo "🌐 URL de l'application: $APP_URL"
+                        echo " Infrastructure AWS déployée avec succès"
+                        echo " IP de l'instance: $INSTANCE_IP"
+                        echo " URL de l'application: $APP_URL"
                         
                         # Attente que l'application soit disponible
-                        echo "⏳ Attente du démarrage de l'application (peut prendre plusieurs minutes)..."
+                        echo " Attente du démarrage de l'application (peut prendre plusieurs minutes)..."
                         
                         # Tentative de connexion avec gestion d'erreur
                         COUNTER=0
                         MAX_RETRIES=18 # 3 minutes max (18 * 10 secondes)
                         while [ $COUNTER -lt $MAX_RETRIES ]; do
                             if curl -s -f http://$INSTANCE_IP:5000/health > /dev/null; then
-                                echo "✅ Application disponible!"
+                                echo " Application disponible!"
                                 break
                             else
                                 echo "En attente... ($((COUNTER * 10)) secondes)"
@@ -291,15 +291,15 @@ EOF
                         done
                         
                         if [ $COUNTER -eq $MAX_RETRIES ]; then
-                            echo "⚠️  L'application ne répond pas après 3 minutes"
+                            echo " L'application ne répond pas après 3 minutes"
                             echo "Cela peut être normal si le déploiement est encore en cours"
                             echo "Vérifiez manuellement plus tard: http://$INSTANCE_IP:5000/health"
                         else
-                            echo "✅ Application déployée et accessible sur: http://$INSTANCE_IP:5000"
+                            echo " Application déployée et accessible sur: http://$INSTANCE_IP:5000"
                             # Test final de l'application
                             echo "Test de santé de l'application..."
                             curl -s http://$INSTANCE_IP:5000/health
-                            echo "🎉 Déploiement AWS terminé avec succès!"
+                            echo " Déploiement AWS terminé avec succès!"
                         fi
                     '''
                 }
@@ -310,7 +310,7 @@ EOF
                     script {
                         def instance_ip = sh(script: "cd ${TF_WORKING_DIR} && terraform output -raw instance_public_ip", returnStdout: true).trim()
                         env.DEPLOYMENT_URL = "http://${instance_ip}:5000"
-                        echo "🌐 Application déployée: ${env.DEPLOYMENT_URL}"
+                        echo " Application déployée: ${env.DEPLOYMENT_URL}"
                     }
                 }
             }
@@ -370,11 +370,11 @@ EOF
         }
         
         success {
-            echo "🎉 Pipeline exécuté avec succès! Application déployée sur AWS"
+            echo " Pipeline exécuté avec succès! Application déployée sur AWS"
         }
         
         failure {
-            echo "❌ Pipeline a échoué. Vérifiez les logs pour plus de détails."
+            echo " Pipeline a échoué. Vérifiez les logs pour plus de détails."
         }
     }
 }
