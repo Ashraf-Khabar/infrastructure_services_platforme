@@ -1,204 +1,96 @@
 #!/bin/bash
 
-# Mise à jour et installation
+# Mise à jour et installation des dépendances système
 apt-get update -y
 apt-get upgrade -y
-apt-get install -y docker.io docker-compose git
-
-# Démarrage de Docker
-systemctl start docker
-systemctl enable docker
+apt-get install -y python3 python3-pip python3-venv
 
 # Création du répertoire de l'application
 mkdir -p /home/ubuntu/user_management_app
 cd /home/ubuntu/user_management_app
 
-# Cette partie sera copiée par Jenkins via SCP
+# Installation des dépendances Python de base pour l'application
+# (Ces dépendances devraient correspondre à vos fichiers requirements.txt)
 
-# Si docker-compose.yml n'existe pas, créez une structure minimale
-if [ ! -f "docker-compose.yml" ]; then
-    echo "Création d'une structure Docker minimale..."
-    
-    # docker-compose.yml
-    cat > docker-compose.yml << 'EOF'
-version: '3.8'
-services:
-  api:
-    build: ./api
-    ports:
-      - "5000:5000"
-    environment:
-      - FLASK_ENV=production
-      - PYTHONPATH=/app
-    volumes:
-      - ./api:/app
+# Dépendances pour l'API
+pip3 install flask==2.3.3 flask-cors==4.0.0 python-dotenv==1.0.0 gunicorn==21.2.0
 
-  client:
-    build: ./client
-    ports:
-      - "8083:8083"
-    environment:
-      - FLASK_ENV=production
-    volumes:
-      - ./client:/app
-    depends_on:
-      - api
+# Dépendances pour le Client
+pip3 install flask==2.3.3 requests==2.31.0
+
+# Création des services systemd - ils attendront que l'application soit copiée
+cat > /etc/systemd/system/user-management-api.service << 'EOF'
+[Unit]
+Description=User Management API Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/user_management_app/api
+ExecStart=/usr/bin/python3 app.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+# Attendre que l'application soit copiée
+ExecStartPre=/bin/sleep 10
+ExecStartPre=/bin/bash -c "while [ ! -f /home/ubuntu/user_management_app/api/app.py ]; do echo 'En attente de l application API...'; sleep 5; done"
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
-    # API Dockerfile
-    mkdir -p api
-    cat > api/Dockerfile << 'EOF'
-FROM python:3.9-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-CMD ["python", "app.py"]
+cat > /etc/systemd/system/user-management-client.service << 'EOF'
+[Unit]
+Description=User Management Client Service
+After=network.target user-management-api.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/user_management_app/client
+ExecStart=/usr/bin/python3 app.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+# Attendre que l'application soit copiée
+ExecStartPre=/bin/sleep 10
+ExecStartPre=/bin/bash -c "while [ ! -f /home/ubuntu/user_management_app/client/app.py ]; do echo 'En attente de l application Client...'; sleep 5; done"
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
-    # Client Dockerfile
-    mkdir -p client
-    cat > client/Dockerfile << 'EOF'
-FROM python:3.9-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-CMD ["python", "app.py"]
+# Activation des services (ils ne démarreront pas tant que l'application n'est pas copiée)
+systemctl daemon-reload
+systemctl enable user-management-api.service
+systemctl enable user-management-client.service
+
+echo "=================================================="
+echo "✅ Environnement préparé avec succès!"
+echo "📁 Répertoire: /home/ubuntu/user_management_app"
+echo "🔧 Services systemd configurés et activés"
+echo "⏳ En attente de la copie de l'application..."
+echo "=================================================="
+
+# Script pour vérifier l'état de l'application
+cat > /home/ubuntu/check_app_status.sh << 'EOF'
+#!/bin/bash
+echo "=== Vérification de l'application ==="
+echo "Répertoire API: $(ls -la /home/ubuntu/user_management_app/api/ 2>/dev/null || echo 'Non trouvé')"
+echo "Répertoire Client: $(ls -la /home/ubuntu/user_management_app/client/ 2>/dev/null || echo 'Non trouvé')"
+echo "Fichier API app.py: $( [ -f /home/ubuntu/user_management_app/api/app.py ] && echo '✅ Présent' || echo '❌ Absent' )"
+echo "Fichier Client app.py: $( [ -f /home/ubuntu/user_management_app/client/app.py ] && echo '✅ Présent' || echo '❌ Absent' )"
+echo "====================================="
 EOF
 
-    # Fichiers minimaux
-    cat > api/requirements.txt << 'EOF'
-flask==2.3.3
-EOF
-
-    cat > api/app.py << 'EOF'
-from flask import Flask, jsonify
-app = Flask(__name__)
-
-@app.route('/')
-def hello():
-    return jsonify({"message": "User Management API", "status": "ok"})
-
-@app.route('/health')
-def health():
-    return jsonify({"status": "healthy", "service": "api"})
-
-@app.route('/api/users')
-def get_users():
-    return jsonify({"users": [], "count": 0, "status": "ok"})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
-EOF
-
-    cat > client/requirements.txt << 'EOF'
-flask==2.3.3
-EOF
-
-    cat > client/app.py << 'EOF'
-from flask import Flask, jsonify, render_template
-import requests
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    try:
-        response = requests.get('http://api:5000/api/users', timeout=2)
-        users_data = response.json()
-    except:
-        users_data = {"users": []}
-    
-    return render_template('index.html', 
-                         message="User Management System",
-                         users=users_data.get('users', []),
-                         api_status="connected" if users_data else "disconnected")
-
-@app.route('/health')
-def health():
-    try:
-        response = requests.get('http://api:5000/health', timeout=2)
-        api_status = response.json()
-    except:
-        api_status = {"status": "unreachable"}
-    
-    return jsonify({
-        "message": "User Management Client", 
-        "status": "ok",
-        "api_status": api_status
-    })
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8083, debug=False)
-EOF
-
-    # Template minimal
-    mkdir -p client/templates
-    cat > client/templates/index.html << 'EOF'
-<!DOCTYPE html>
-<html>
-<head>
-    <title>User Management System</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 800px; margin: 0 auto; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>User Management System</h1>
-        <p>Application en cours de déploiement...</p>
-    </div>
-</body>
-</html>
-EOF
-fi
-
-# Construction et démarrage avec Docker Compose
-echo "Construction des images Docker..."
-docker-compose build
-
-echo "Démarrage des services..."
-docker-compose up -d
-
-# Attente du démarrage
-echo "Attente du démarrage des services..."
-sleep 20
-
-# Vérification
-echo "=== CONTAINERS ==="
-docker ps
-echo ""
-
-echo "=== LOGS ==="
-docker-compose logs --tail=10
-echo ""
-
-echo "=== HEALTH CHECKS ==="
-curl -s http://localhost:5000/health || echo "API health check failed"
-echo ""
-curl -s http://localhost:8083/health || echo "Client health check failed"
-echo ""
+chmod +x /home/ubuntu/check_app_status.sh
 
 # Information d'accès
 PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
-echo "=================================================="
-echo "Application déployée!"
-echo "API: http://$PUBLIC_IP:5000"
-echo "Interface: http://$PUBLIC_IP:8083"
-echo "=================================================="
-
-# Script de monitoring
-cat > /home/ubuntu/monitor_docker.sh << 'EOF'
-#!/bin/bash
-while true; do
-    echo "=== $(date) ==="
-    echo "Containers:"
-    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-    echo "=========================="
-    sleep 30
-done
-EOF
-
-chmod +x /home/ubuntu/monitor_docker.sh
-nohup /home/ubuntu/monitor_docker.sh > /home/ubuntu/docker_monitor.log 2>&1 &
+echo "🌐 IP Publique: $PUBLIC_IP"
+echo "🚀 Une fois l'application copiée, elle sera accessible sur:"
+echo "   - API: http://$PUBLIC_IP:5000"
+echo "   - Client: http://$PUBLIC_IP:8083"

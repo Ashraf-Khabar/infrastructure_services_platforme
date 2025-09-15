@@ -442,57 +442,103 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     sh """
                         cd ${TF_WORKING_DIR}
                         
-                        # Initialisation et application Terraform
+                        # Initialisation Terraform
+                        echo "Initialisation de Terraform..."
                         terraform init -input=false
+                        
+                        # Validation du plan
+                        echo "Validation de la configuration Terraform..."
                         terraform validate
+                        
+                        # Plan d'infrastructure
+                        echo "Création du plan d'infrastructure..."
                         terraform plan -out=tfplan
+                        
+                        # Application de l'infrastructure
+                        echo "Application de l'infrastructure..."
                         terraform apply -auto-approve tfplan
                         
-                        # Récupération de l'IP
+                        # Récupération de l'IP de l'instance
                         INSTANCE_IP=\$(terraform output -raw instance_public_ip)
+                        echo " IP de l'instance: \$INSTANCE_IP"
                         
-                        # Copie de l'application complète sur l'instance
-                        echo "Copie de l'application sur l'instance..."
+                        # COPIE DE L'APPLICATION SUR L'INSTANCE
+                        echo "📦 Copie de l'application sur l'instance..."
+                        
+                        # Copie de l'application complète
                         rsync -avz -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \\
                             ${APP_DIR}/ ubuntu@\$INSTANCE_IP:/home/ubuntu/user_management_app/
                         
-                        # Reconstruction et redémarrage des containers
+                        # Installation des dépendances spécifiques
                         ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@\$INSTANCE_IP << 'EOF'
                             cd /home/ubuntu/user_management_app
-                            sudo docker-compose down
-                            sudo docker-compose build --no-cache
-                            sudo docker-compose up -d
-                            sleep 15
-                            sudo docker-compose ps
-                            sudo docker-compose logs --tail=10
-                        EOF
+                            
+                            # Installation des dépendances API
+                            if [ -f "api/requirements.txt" ]; then
+                                echo "📦 Installation des dépendances API..."
+                                pip3 install -r api/requirements.txt
+                            fi
+                            
+                            # Installation des dépendances Client
+                            if [ -f "client/requirements.txt" ]; then
+                                echo "📦 Installation des dépendances Client..."
+                                pip3 install -r client/requirements.txt
+                            fi
+                            
+                            # Démarrage des services
+                            echo "🚀 Démarrage des services..."
+                            sudo systemctl start user-management-api.service
+                            sudo systemctl start user-management-client.service
+                            
+                            # Vérification
+                            echo "✅ Vérification des services..."
+                            sudo systemctl status user-management-api.service --no-pager
+                            sudo systemctl status user-management-client.service --no-pager
+                            
+                            echo "🌐 Vérification de l'application..."
+                            sleep 10
+                            curl -s http://localhost:5000/health || echo "API non disponible"
+                            curl -s http://localhost:8083/health || echo "Client non disponible"
+        EOF
                         
-                        # Attente et vérification
-                        echo "Attente du démarrage de l'application..."
+                        # Attente que l'application soit disponible
+                        echo "⏳ Attente du démarrage de l'application..."
                         COUNTER=0
                         MAX_RETRIES=30
                         while [ \$COUNTER -lt \$MAX_RETRIES ]; do
-                            if curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null && \\
+                            if curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null && \
                             curl -s -f http://\$INSTANCE_IP:8083/health > /dev/null; then
-                                echo " Application disponible!"
+                                echo "✅ Application disponible!"
                                 break
+                            else
+                                echo "⏳ En attente... (\$((COUNTER * 10)) secondes)"
+                                sleep 10
+                                COUNTER=\$((COUNTER + 1))
                             fi
-                            echo "En attente... (\$((COUNTER * 10)) secondes)"
-                            sleep 10
-                            COUNTER=\$((COUNTER + 1))
                         done
                         
-                        # Tests finaux
-                        echo "Test de santé de l'API..."
-                        curl -s http://\$INSTANCE_IP:5000/health
-                        echo "Test de santé du Client..."
-                        curl -s http://\$INSTANCE_IP:8083/health
-                        echo "Test de la page d'accueil..."
-                        curl -s http://\$INSTANCE_IP:8083 | head -n 5
+                        if [ \$COUNTER -eq \$MAX_RETRIES ]; then
+                            echo "⚠️  L'application ne répond pas après 5 minutes"
+                            echo "Vérifiez manuellement:"
+                            echo "API: http://\$INSTANCE_IP:5000/health"
+                            echo "Client: http://\$INSTANCE_IP:8083/health"
+                        else
+                            echo "🎉 Application déployée avec succès!"
+                            echo "🔗 API: http://\$INSTANCE_IP:5000"
+                            echo "🔗 Interface: http://\$INSTANCE_IP:8083"
+                            
+                            # Test final
+                            echo "🧪 Test final de l'application..."
+                            curl -s http://\$INSTANCE_IP:5000/health
+                            echo ""
+                            curl -s http://\$INSTANCE_IP:8083/health
+                            echo ""
+                        fi
                     """
                 }
             }
         }
+
     }
 
     post {
