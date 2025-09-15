@@ -19,7 +19,6 @@ pipeline {
 
         PYTHON_PACKAGE_VERSION = 'N/A'
         
-        // Variables AWS
         AWS_REGION = 'us-east-1'
         TF_WORKING_DIR = "${WORKSPACE}/cloud_infrastructure"
     }
@@ -406,7 +405,6 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     """
                     sh "ls -la ${APP_DIR}/dist/"
                     
-                    // Récupération de la version du package
                     def version = sh(script: "cd ${APP_DIR} && ${VENV_PATH}/bin/python setup.py --version", returnStdout: true).trim()
                     env.PYTHON_PACKAGE_VERSION = version
                 }
@@ -528,7 +526,6 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             script {
                 def buildStatus = currentBuild.currentResult
                 
-                // Nettoyage des processus
                 sh """
                     echo "Cleaning up processes..."
                     if [ -f ${API_PID_FILE} ]; then

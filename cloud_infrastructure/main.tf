@@ -11,12 +11,10 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Utilisation de la VPC existante
 data "aws_vpc" "existing" {
-  id = "vpc-02346cf0516d0be84"  # Votre VPC ID
+  id = "vpc-02346cf0516d0be84"  
 }
 
-# Récupération de l'Internet Gateway existant
 data "aws_internet_gateway" "existing" {
   filter {
     name   = "attachment.vpc-id"
@@ -24,7 +22,6 @@ data "aws_internet_gateway" "existing" {
   }
 }
 
-# AMI Ubuntu
 data "aws_ami" "ubuntu" {
   most_recent = true
 
@@ -46,7 +43,6 @@ data "aws_ami" "ubuntu" {
   owners = ["099720109477"]
 }
 
-# Création d'un nouveau subnet avec CIDR unique
 resource "aws_subnet" "public" {
   vpc_id                  = data.aws_vpc.existing.id
   cidr_block              = var.subnet_cidr
@@ -58,7 +54,6 @@ resource "aws_subnet" "public" {
   }
 }
 
-# Route table utilisant l'IGW existant
 resource "aws_route_table" "public" {
   vpc_id = data.aws_vpc.existing.id
 
@@ -72,13 +67,11 @@ resource "aws_route_table" "public" {
   }
 }
 
-# Association route table
 resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.public.id
 }
 
-# Groupe de sécurité avec nom unique
 resource "aws_security_group" "app" {
   name        = "user-management-sg-${formatdate("YYYYMMDD", timestamp())}"
   description = "Security group for user management app"
@@ -129,7 +122,6 @@ resource "aws_security_group" "app" {
   }
 }
 
-# Clé SSH avec nom unique
 resource "aws_key_pair" "deployer" {
   key_name   = "user-management-deployer-key-${formatdate("YYYYMMDD-hhmmss", timestamp())}"
   public_key = file("~/.ssh/id_rsa.pub")
@@ -139,7 +131,6 @@ resource "aws_key_pair" "deployer" {
   }
 }
 
-# Instance EC2
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
@@ -158,7 +149,6 @@ resource "aws_instance" "app" {
   associate_public_ip_address = true
 }
 
-# Adresse IP élastique
 resource "aws_eip" "app" {
   instance = aws_instance.app.id
   vpc      = true

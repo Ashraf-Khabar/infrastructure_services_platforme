@@ -13,5 +13,5 @@ variable "instance_type" {
 variable "subnet_cidr" {
   description = "CIDR block for the subnet"
   type        = string
-  default     = "10.0.3.0/24"  # CIDR changé pour éviter les conflits
+  default     = "10.0.3.0/24" 
 }
