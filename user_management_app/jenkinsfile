@@ -434,178 +434,120 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
         }
 
-        stage('Deploy to AWS') {
-            steps {
-                script {
-                    echo " 🚀 Déploiement sur AWS..."
-                    
-                    sh """
-                        cd ${TF_WORKING_DIR}
-                        
-                        # Initialisation Terraform
-                        echo "Initialisation de Terraform..."
-                        terraform init -input=false
-                        
-                        # Validation du plan
-                        echo "Validation de la configuration Terraform..."
-                        terraform validate
-                        
-                        # Plan d'infrastructure
-                        echo "Création du plan d'infrastructure..."
-                        terraform plan -out=tfplan
-                        
-                        # Application de l'infrastructure
-                        echo "Application de l'infrastructure..."
-                        terraform apply -auto-approve tfplan
-                        
-                        # Récupération de l'IP de l'instance
-                        INSTANCE_IP=\$(terraform output -raw instance_public_ip)
-                        echo " 🌐 IP de l'instance: \$INSTANCE_IP"
-                        
-                        # Préparation des fichiers de service systemd
-                        echo " Préparation des fichiers de service..."
-                        cat > /tmp/user-management-api.service << 'EOF'
-[Unit]
-Description=User Management API Service
-After=network.target
-
-[Service]
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/ubuntu/user_management_app/api
-ExecStart=/usr/bin/python3 /home/ubuntu/user_management_app/api/app.py
-Restart=always
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-                        cat > /tmp/user-management-client.service << 'EOF'
-[Unit]
-Description=User Management Client Service
-After=network.target
-Requires=user-management-api.service
-
-[Service]
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/ubuntu/user_management_app/client
-ExecStart=/usr/bin/python3 /home/ubuntu/user_management_app/client/app.py
-Restart=always
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-                        # Copie de l'application et des fichiers de service
-                        echo " 📦 Copie de l'application sur l'instance..."
-                        rsync -avz -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \\
-                            ${APP_DIR}/ ubuntu@\$INSTANCE_IP:/home/ubuntu/user_management_app/
-                        
-                        # Copie des fichiers de service
-                        scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa \\
-                            /tmp/user-management-api.service \\
-                            /tmp/user-management-client.service \\
-                            ubuntu@\$INSTANCE_IP:/tmp/
-                        
-                        # Installation et configuration sur l'instance
-                        echo " ⚙️  Configuration de l'instance..."
-                        ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@\$INSTANCE_IP << 'EOF'
-#!/bin/bash
-set -e
-
-echo "🐍 Installation de Python et pip..."
-sudo apt update -y
-sudo apt install -y python3 python3-pip python3-venv
-
-echo "📦 Installation des dépendances..."
+stage('Deploy to AWS') {
+    steps {
+        script {
+            echo " Déploiement sur AWS..."
+            
+            sh """
+                cd ${TF_WORKING_DIR}
+                
+                # Initialisation Terraform
+                echo "Initialisation de Terraform..."
+                terraform init -input=false
+                
+                # Validation du plan
+                echo "Validation de la configuration Terraform..."
+                terraform validate
+                
+                # Plan d'infrastructure
+                echo "Création du plan d'infrastructure..."
+                terraform plan -out=tfplan
+                
+                # Application de l'infrastructure
+                echo "Application de l'infrastructure..."
+                terraform apply -auto-approve tfplan
+                
+                # Récupération de l'IP de l'instance
+                INSTANCE_IP=\$(terraform output -raw instance_public_ip)
+                echo " IP de l'instance: \$INSTANCE_IP"
+                
+                # COPIE DE L'APPLICATION SUR L'INSTANCE
+                echo " Copie de l'application sur l'instance..."
+                
+                # Copie de l'application complète
+                rsync -avz -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \\
+                    ${APP_DIR}/ ubuntu@\$INSTANCE_IP:/home/ubuntu/user_management_app/
+                
+                # Installation des dépendances spécifiques
+                ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@\$INSTANCE_IP << 'EOF'
 cd /home/ubuntu/user_management_app
+
+# Installation de Python et pip si nécessaire
+
+if ! command -v pip3 &> /dev/null; then
+    echo " Installation de Python et pip..."
+    sudo apt update -y
+    sudo apt install -y python3 python3-pip
+fi
 
 # Installation des dépendances API
 if [ -f "api/requirements.txt" ]; then
-    echo "🔧 Installation des dépendances API..."
+    echo " Installation des dépendances API..."
     pip3 install -r api/requirements.txt
 fi
 
 # Installation des dépendances Client
 if [ -f "client/requirements.txt" ]; then
-    echo "🔧 Installation des dépendances Client..."
+    echo " Installation des dépendances Client..."
     pip3 install -r client/requirements.txt
 fi
 
-echo "⚙️  Configuration des services systemd..."
-# Déplacement des fichiers de service
-sudo mv /tmp/user-management-api.service /etc/systemd/system/
-sudo mv /tmp/user-management-client.service /etc/systemd/system/
-
-# Rechargement de systemd
-sudo systemctl daemon-reload
-
-# Activation des services
-sudo systemctl enable user-management-api.service
-sudo systemctl enable user-management-client.service
-
-echo "🚀 Démarrage des services..."
+# Démarrage des services
+echo " Démarrage des services..."
 sudo systemctl start user-management-api.service
 sudo systemctl start user-management-client.service
 
-echo "✅ Vérification des services..."
-sleep 5
-sudo systemctl status user-management-api.service --no-pager || true
-sudo systemctl status user-management-client.service --no-pager || true
+# Vérification
+echo " Vérification des services..."
+sudo systemctl status user-management-api.service --no-pager
+sudo systemctl status user-management-client.service --no-pager
 
-echo "🔍 Vérification de l'application..."
+echo " Vérification de l'application..."
 sleep 10
-curl -s http://localhost:5000/health || echo "⚠️  API non disponible"
-curl -s http://localhost:8083/health || echo "⚠️  Client non disponible"
+curl -s http://localhost:5000/health || echo "API non disponible"
+curl -s http://localhost:8083/health || echo "Client non disponible"
 EOF
-                        
-                        # Attente que l'application soit disponible
-                        echo "⏳ Attente du démarrage de l'application..."
-                        COUNTER=0
-                        MAX_RETRIES=30
-                        while [ \$COUNTER -lt \$MAX_RETRIES ]; do
-                            if curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null && \\
-                               curl -s -f http://\$INSTANCE_IP:8083/health > /dev/null; then
-                                echo "✅ Application disponible!"
-                                break
-                            else
-                                echo "⏱️  En attente... (\$((COUNTER * 10)) secondes)"
-                                sleep 10
-                                COUNTER=\$((COUNTER + 1))
-                            fi
-                        done
-                        
-                        if [ \$COUNTER -eq \$MAX_RETRIES ]; then
-                            echo "❌ L'application ne répond pas après 5 minutes"
-                            echo "Vérifiez manuellement:"
-                            echo "API: http://\$INSTANCE_IP:5000/health"
-                            echo "Client: http://\$INSTANCE_IP:8083/health"
-                            currentBuild.result = 'UNSTABLE'
-                        else
-                            echo "🎉 Application déployée avec succès!"
-                            echo "🔗 API: http://\$INSTANCE_IP:5000"
-                            echo "🔗 Interface: http://\$INSTANCE_IP:8083"
-                            
-                            # Test final
-                            echo "🧪 Test final de l'application..."
-                            curl -s http://\$INSTANCE_IP:5000/health
-                            echo ""
-                            curl -s http://\$INSTANCE_IP:8083/health
-                            echo ""
-                            
-                            # Définition des variables d'environnement pour l'email
-                            env.DEPLOYMENT_URL = "http://\$INSTANCE_IP:5000"
-                            env.CLIENT_URL = "http://\$INSTANCE_IP:8083"
-                        fi
-                    """
-                }
-            }
+                
+                # Attente que l'application soit disponible
+                echo " Attente du démarrage de l'application..."
+                COUNTER=0
+                MAX_RETRIES=30
+                while [ \$COUNTER -lt \$MAX_RETRIES ]; do
+                    if curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null && \\
+                       curl -s -f http://\$INSTANCE_IP:8083/health > /dev/null; then
+                        echo " Application disponible!"
+                        break
+                    else
+                        echo " En attente... (\$((COUNTER * 10)) secondes)"
+                        sleep 10
+                        COUNTER=\$((COUNTER + 1))
+                    fi
+                done
+                
+                if [ \$COUNTER -eq \$MAX_RETRIES ]; then
+                    echo " L'application ne répond pas après 5 minutes"
+                    echo "Vérifiez manuellement:"
+                    echo "API: http://\$INSTANCE_IP:5000/health"
+                    echo "Client: http://\$INSTANCE_IP:8083/health"
+                else
+                    echo " Application déployée avec succès!"
+                    echo " API: http://\$INSTANCE_IP:5000"
+                    echo " Interface: http://\$INSTANCE_IP:8083"
+                    
+                    # Test final
+                    echo " Test final de l'application..."
+                    curl -s http://\$INSTANCE_IP:5000/health
+                    echo ""
+                    curl -s http://\$INSTANCE_IP:8083/health
+                    echo ""
+                fi
+            """
         }
+    }
+}
+
+
     }
 
     post {
@@ -614,7 +556,7 @@ EOF
                 def buildStatus = currentBuild.currentResult
                 
                 sh """
-                    echo "🧹 Nettoyage des processus..."
+                    echo "Cleaning up processes..."
                     if [ -f ${API_PID_FILE} ]; then
                         PID=\$(cat ${API_PID_FILE})
                         kill \$PID 2>/dev/null || true
@@ -622,7 +564,7 @@ EOF
                     fi
                     pkill -f "python.*app\\.py" 2>/dev/null || true
                     pkill -f "uvicorn" 2>/dev/null || true
-                    echo "Nettoyage terminé"
+                    echo "Cleanup completed"
                 """
 
                 def statusColor
@@ -661,15 +603,11 @@ EOF
         }
         
         success {
-            echo "✅ Pipeline exécuté avec succès! Application déployée sur AWS"
+            echo " Pipeline exécuté avec succès! Application déployée sur AWS"
         }
         
         failure {
-            echo "❌ Pipeline a échoué. Vérifiez les logs pour plus de détails."
-        }
-        
-        unstable {
-            echo "⚠️  Pipeline terminé avec des avertissements. L'application peut ne pas être totalement fonctionnelle."
+            echo " Pipeline a échoué. Vérifiez les logs pour plus de détails."
         }
     }
 }
