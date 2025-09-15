@@ -434,110 +434,111 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
             }
         }
 
-        stage('Deploy to AWS') {
-            steps {
-                script {
-                    echo " Déploiement sur AWS..."
+stage('Deploy to AWS') {
+    steps {
+        script {
+            echo " Déploiement sur AWS..."
+            
+            sh """
+                cd ${TF_WORKING_DIR}
+                
+                # Initialisation Terraform
+                echo "Initialisation de Terraform..."
+                terraform init -input=false
+                
+                # Validation du plan
+                echo "Validation de la configuration Terraform..."
+                terraform validate
+                
+                # Plan d'infrastructure
+                echo "Création du plan d'infrastructure..."
+                terraform plan -out=tfplan
+                
+                # Application de l'infrastructure
+                echo "Application de l'infrastructure..."
+                terraform apply -auto-approve tfplan
+                
+                # Récupération de l'IP de l'instance
+                INSTANCE_IP=\$(terraform output -raw instance_public_ip)
+                echo " IP de l'instance: \$INSTANCE_IP"
+                
+                # COPIE DE L'APPLICATION SUR L'INSTANCE
+                echo " Copie de l'application sur l'instance..."
+                
+                # Copie de l'application complète
+                rsync -avz -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \\
+                    ${APP_DIR}/ ubuntu@\$INSTANCE_IP:/home/ubuntu/user_management_app/
+                
+                # Installation des dépendances spécifiques
+                ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@\$INSTANCE_IP << 'EOF'
+cd /home/ubuntu/user_management_app
+
+# Installation des dépendances API
+if [ -f "api/requirements.txt" ]; then
+    echo " Installation des dépendances API..."
+    pip3 install -r api/requirements.txt
+fi
+
+# Installation des dépendances Client
+if [ -f "client/requirements.txt" ]; then
+    echo " Installation des dépendances Client..."
+    pip3 install -r client/requirements.txt
+fi
+
+# Démarrage des services
+echo " Démarrage des services..."
+sudo systemctl start user-management-api.service
+sudo systemctl start user-management-client.service
+
+# Vérification
+echo " Vérification des services..."
+sudo systemctl status user-management-api.service --no-pager
+sudo systemctl status user-management-client.service --no-pager
+
+echo " Vérification de l'application..."
+sleep 10
+curl -s http://localhost:5000/health || echo "API non disponible"
+curl -s http://localhost:8083/health || echo "Client non disponible"
+EOF
+                
+                # Attente que l'application soit disponible
+                echo " Attente du démarrage de l'application..."
+                COUNTER=0
+                MAX_RETRIES=30
+                while [ \$COUNTER -lt \$MAX_RETRIES ]; do
+                    if curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null && \\
+                       curl -s -f http://\$INSTANCE_IP:8083/health > /dev/null; then
+                        echo " Application disponible!"
+                        break
+                    else
+                        echo " En attente... (\$((COUNTER * 10)) secondes)"
+                        sleep 10
+                        COUNTER=\$((COUNTER + 1))
+                    fi
+                done
+                
+                if [ \$COUNTER -eq \$MAX_RETRIES ]; then
+                    echo " L'application ne répond pas après 5 minutes"
+                    echo "Vérifiez manuellement:"
+                    echo "API: http://\$INSTANCE_IP:5000/health"
+                    echo "Client: http://\$INSTANCE_IP:8083/health"
+                else
+                    echo " Application déployée avec succès!"
+                    echo " API: http://\$INSTANCE_IP:5000"
+                    echo " Interface: http://\$INSTANCE_IP:8083"
                     
-                    sh """
-                        cd ${TF_WORKING_DIR}
-                        
-                        # Initialisation Terraform
-                        echo "Initialisation de Terraform..."
-                        terraform init -input=false
-                        
-                        # Validation du plan
-                        echo "Validation de la configuration Terraform..."
-                        terraform validate
-                        
-                        # Plan d'infrastructure
-                        echo "Création du plan d'infrastructure..."
-                        terraform plan -out=tfplan
-                        
-                        # Application de l'infrastructure
-                        echo "Application de l'infrastructure..."
-                        terraform apply -auto-approve tfplan
-                        
-                        # Récupération de l'IP de l'instance
-                        INSTANCE_IP=\$(terraform output -raw instance_public_ip)
-                        echo " IP de l'instance: \$INSTANCE_IP"
-                        
-                        # COPIE DE L'APPLICATION SUR L'INSTANCE
-                        echo "📦 Copie de l'application sur l'instance..."
-                        
-                        # Copie de l'application complète
-                        rsync -avz -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \\
-                            ${APP_DIR}/ ubuntu@\$INSTANCE_IP:/home/ubuntu/user_management_app/
-                        
-                        # Installation des dépendances spécifiques
-                        ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@\$INSTANCE_IP << 'EOF'
-                            cd /home/ubuntu/user_management_app
-                            
-                            # Installation des dépendances API
-                            if [ -f "api/requirements.txt" ]; then
-                                echo "📦 Installation des dépendances API..."
-                                pip3 install -r api/requirements.txt
-                            fi
-                            
-                            # Installation des dépendances Client
-                            if [ -f "client/requirements.txt" ]; then
-                                echo "📦 Installation des dépendances Client..."
-                                pip3 install -r client/requirements.txt
-                            fi
-                            
-                            # Démarrage des services
-                            echo "🚀 Démarrage des services..."
-                            sudo systemctl start user-management-api.service
-                            sudo systemctl start user-management-client.service
-                            
-                            # Vérification
-                            echo "✅ Vérification des services..."
-                            sudo systemctl status user-management-api.service --no-pager
-                            sudo systemctl status user-management-client.service --no-pager
-                            
-                            echo "🌐 Vérification de l'application..."
-                            sleep 10
-                            curl -s http://localhost:5000/health || echo "API non disponible"
-                            curl -s http://localhost:8083/health || echo "Client non disponible"
-        EOF
-                        
-                        # Attente que l'application soit disponible
-                        echo "⏳ Attente du démarrage de l'application..."
-                        COUNTER=0
-                        MAX_RETRIES=30
-                        while [ \$COUNTER -lt \$MAX_RETRIES ]; do
-                            if curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null && \
-                            curl -s -f http://\$INSTANCE_IP:8083/health > /dev/null; then
-                                echo "✅ Application disponible!"
-                                break
-                            else
-                                echo "⏳ En attente... (\$((COUNTER * 10)) secondes)"
-                                sleep 10
-                                COUNTER=\$((COUNTER + 1))
-                            fi
-                        done
-                        
-                        if [ \$COUNTER -eq \$MAX_RETRIES ]; then
-                            echo "⚠️  L'application ne répond pas après 5 minutes"
-                            echo "Vérifiez manuellement:"
-                            echo "API: http://\$INSTANCE_IP:5000/health"
-                            echo "Client: http://\$INSTANCE_IP:8083/health"
-                        else
-                            echo "🎉 Application déployée avec succès!"
-                            echo "🔗 API: http://\$INSTANCE_IP:5000"
-                            echo "🔗 Interface: http://\$INSTANCE_IP:8083"
-                            
-                            # Test final
-                            echo "🧪 Test final de l'application..."
-                            curl -s http://\$INSTANCE_IP:5000/health
-                            echo ""
-                            curl -s http://\$INSTANCE_IP:8083/health
-                            echo ""
-                        fi
-                    """
-                }
-            }
+                    # Test final
+                    echo " Test final de l'application..."
+                    curl -s http://\$INSTANCE_IP:5000/health
+                    echo ""
+                    curl -s http://\$INSTANCE_IP:8083/health
+                    echo ""
+                fi
+            """
         }
+    }
+}
+
 
     }
 
