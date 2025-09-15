@@ -8,6 +8,11 @@ output "application_url" {
   value       = "http://${aws_eip.app.public_ip}:5000"
 }
 
+output "client_url" {
+  description = "URL of the deployed client"
+  value       = "http://${aws_eip.app.public_ip}:8083"
+}
+
 output "ssh_connection_command" {
   description = "SSH connection command"
   value       = "ssh -i ~/.ssh/id_rsa ubuntu@${aws_eip.app.public_ip}"
@@ -21,4 +26,9 @@ output "vpc_id" {
 output "subnet_id" {
   description = "ID of the subnet used"
   value       = aws_subnet.public.id
+}
+
+output "security_group_id" {
+  description = "ID of the security group used"
+  value       = aws_security_group.app.id
 }

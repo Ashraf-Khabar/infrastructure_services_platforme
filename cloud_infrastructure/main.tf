@@ -11,7 +11,7 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Utilisation de la VPC que vous avez créée
+# Utilisation de la VPC existante
 data "aws_vpc" "existing" {
   id = "vpc-02346cf0516d0be84"  # Votre VPC ID
 }
@@ -46,10 +46,10 @@ data "aws_ami" "ubuntu" {
   owners = ["099720109477"]
 }
 
-# Création d'un nouveau subnet
+# Création d'un nouveau subnet avec CIDR unique
 resource "aws_subnet" "public" {
   vpc_id                  = data.aws_vpc.existing.id
-  cidr_block              = "10.0.2.0/24"  # ← Changez le CIDR
+  cidr_block              = var.subnet_cidr
   availability_zone       = "${var.aws_region}a"
   map_public_ip_on_launch = true
 
@@ -58,13 +58,13 @@ resource "aws_subnet" "public" {
   }
 }
 
-# Route table
+# Route table utilisant l'IGW existant
 resource "aws_route_table" "public" {
   vpc_id = data.aws_vpc.existing.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = data.aws_internet_gateway.existing.id  # Utiliser l'IGW existant
+    gateway_id = data.aws_internet_gateway.existing.id
   }
 
   tags = {
@@ -78,9 +78,9 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Groupe de sécurité
+# Groupe de sécurité avec nom unique
 resource "aws_security_group" "app" {
-  name        = "user-management-sg"
+  name        = "user-management-sg-${formatdate("YYYYMMDD", timestamp())}"
   description = "Security group for user management app"
   vpc_id      = data.aws_vpc.existing.id
 
@@ -108,6 +108,14 @@ resource "aws_security_group" "app" {
     description = "App API access"
   }
 
+  ingress {
+    from_port   = 8083
+    to_port     = 8083
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "App Client access"
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -121,9 +129,9 @@ resource "aws_security_group" "app" {
   }
 }
 
-# Clé SSH
+# Clé SSH avec nom unique
 resource "aws_key_pair" "deployer" {
-  key_name   = "user-management-deployer-key-${formatdate("YYYYMMDD-hhmmss", timestamp())}"  # Nom unique avec timestamp
+  key_name   = "user-management-deployer-key-${formatdate("YYYYMMDD-hhmmss", timestamp())}"
   public_key = file("~/.ssh/id_rsa.pub")
 
   tags = {

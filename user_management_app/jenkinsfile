@@ -159,7 +159,7 @@ pipeline {
                         if [ -n "\$SUBNET_IDS" ]; then
                             echo "Vérification des subnets à supprimer: \$SUBNET_IDS"
                             for subnet_id in \$SUBNET_IDS; do
-                                # Vérifier si le subnet est vide
+                                # Vérifier si le subnet est empty
                                 INSTANCE_COUNT=\$(aws ec2 describe-instances \\
                                     --filters "Name=subnet-id,Values=\$subnet_id" \\
                                     --query "length(Reservations[].Instances[])" \\
@@ -182,13 +182,8 @@ pipeline {
             steps {
                 script {
                     echo "🔧 Correction de la configuration Terraform..."
-                    // CORRECTION ICI : Utilisation de doubles quotes sans interpolation
                     sh '''
                         cd ''' + TF_WORKING_DIR + '''
-                        
-                        # Supprimer les outputs de main.tf s'ils existent
-                        echo "Nettoyage des outputs dans main.tf..."
-                        sed -i '/^output ".*" {/,/^}$/d' main.tf || echo "Aucun output à supprimer dans main.tf"
                         
                         # S'assurer que outputs.tf existe avec le bon contenu
                         if [ ! -f outputs.tf ]; then
@@ -202,6 +197,11 @@ output "instance_public_ip" {
 output "application_url" {
   description = "URL of the deployed application"
   value       = "http://${aws_eip.app.public_ip}:5000"
+}
+
+output "client_url" {
+  description = "URL of the deployed client"
+  value       = "http://${aws_eip.app.public_ip}:8083"
 }
 
 output "ssh_connection_command" {
@@ -218,16 +218,17 @@ output "subnet_id" {
   description = "ID of the subnet used"
   value       = aws_subnet.public.id
 }
+
+output "security_group_id" {
+  description = "ID of the security group used"
+  value       = aws_security_group.app.id
+}
 EOF
                         else
                             echo " Fichier outputs.tf existe déjà"
                         fi
 
-                        # Correction du CIDR du subnet pour éviter les conflits
-                        echo " Correction du CIDR du subnet pour éviter les conflits..."
-                        sed -i 's|10.0.1.0/24|10.0.2.0/24|' main.tf || echo "Modification CIDR échouée, continuation..."
-
-                        # Ré-initialisation Terraform après modification
+                        # Ré-initialisation Terraform
                         echo "Ré-initialisation de Terraform..."
                         terraform init -input=false
                         
@@ -238,16 +239,210 @@ EOF
             }
         }
 
-        // ... (les autres stages restent inchangés) ...
+        stage('Install Dependencies') {
+            parallel {
+                stage('API Dependencies') {
+                    steps { sh "${VENV_PATH}/bin/pip install -r ${APP_DIR}/api/requirements.txt" }
+                }
+                stage('Client Dependencies') {
+                    steps { sh "${VENV_PATH}/bin/pip install -r ${APP_DIR}/client/requirements.txt" }
+                }
+                stage('Test Dependencies') {
+                    steps { sh "${VENV_PATH}/bin/pip install pytest requests" }
+                }
+                stage('Robot Framework Dependencies') {
+                    steps {
+                        sh """
+                            ${VENV_PATH}/bin/pip install robotframework
+                            ${VENV_PATH}/bin/pip install robotframework-requests
+                            ${VENV_PATH}/bin/pip install robotframework-databaselibrary
+                            ${VENV_PATH}/bin/pip install psycopg2-binary
+                        """
+                    }
+                }
+                stage('Prometheus Dependencies') {
+                    steps { sh "${VENV_PATH}/bin/pip install prometheus-client" }
+                }
+            }
+        }
+
+        stage('Start API Server') {
+            steps {
+                script {
+                    echo "Starting API server :"
+                    sh """
+                        cd ${APP_DIR}/api
+                        nohup ${VENV_PATH}/bin/python app.py > /dev/null 2>&1 &
+                        echo \$! > ${API_PID_FILE}
+                        sleep 3
+                    """
+
+                    timeout(time: 60, unit: 'SECONDS') {
+                        waitUntil {
+                            try {
+                                sh """
+                                    curl -s -f http://localhost:5000/health > /dev/null
+                                """
+                                echo "API is ready and responding!"
+                                return true
+                            } catch (Exception e) {
+                                echo "API not ready yet, waiting..."
+                                sleep 5
+                                return false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Execute Tests') {
+            parallel {
+                stage('API Tests') {
+                    steps { sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_api.py -v --tb=short" }
+                }
+                stage('Model Tests') {
+                    steps { sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_models.py -v --tb=short" }
+                }
+                stage('Unit Tests') {
+                    steps { sh "${VENV_PATH}/bin/python -m pytest ${APP_DIR}/tests/test_unit.py -v --tb=short" }
+                }
+                stage('Robot Framework Tests') {
+                    steps {
+                        script {
+                            sh """
+                                mkdir -p ${ROBOT_REPORTS_DIR}
+                                cd ${APP_DIR}/robot_tests
+                                set +e
+                                ${VENV_PATH}/bin/robot \
+                                    --outputdir ${ROBOT_REPORTS_DIR} \
+                                    --output output.xml \
+                                    --report report.html \
+                                    --log log.html \
+                                    --xunit xunit.xml \
+                                    . || echo "Robot Framework tests finished with failures"
+                                set -e
+                            """
+                        }
+                    }
+                    post {
+                        always {
+                            script {
+                                def outputFile = "${ROBOT_REPORTS_DIR}/output.xml"
+                                if (fileExists(outputFile)) {
+                                    echo "Publishing final Robot Framework report: ${outputFile}"
+                                    robot outputPath: "${ROBOT_REPORTS_DIR}",
+                                          outputFileName: "output.xml",
+                                          reportFileName: "report.html",
+                                          logFileName: "log.html",
+                                          disableArchiveOutput: true,
+                                          passThreshold: 70.0,
+                                          unstableThreshold: 50.0
+                                } else {
+                                    echo "No Robot report file found"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Push Metrics to Prometheus') {
+            steps {
+                script {
+                    echo "Pushing metrics to Prometheus..."
+                    def metrics = """
+# HELP jenkins_custom_build_info Build information
+# TYPE jenkins_custom_build_info gauge
+jenkins_custom_build_info{job="${env.JOB_NAME}", build_number="${env.BUILD_NUMBER}", result="${currentBuild.currentResult}"} 1
+
+# HELP jenkins_custom_build_duration_seconds Build duration in seconds
+# TYPE jenkins_custom_build_duration_seconds gauge
+jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.duration / 1000}
+"""
+                    try {
+                        sh """
+                            echo '${metrics}' | curl --connect-timeout 5 --max-time 10 -X POST --data-binary @- ${PROMETHEUS_PUSH_GATEWAY}/metrics/job/jenkins/instance/${env.JOB_NAME} || echo "Prometheus push failed"
+                        """
+                        echo "Metrics pushed to Prometheus successfully"
+                    } catch (Exception e) {
+                        echo "Failed to push metrics to Prometheus: ${e.getMessage()}"
+                    }
+                }
+            }
+        }
+
+        stage('Stop API Server') {
+            steps {
+                script {
+                    echo "Stopping API server :"
+                    sh """
+                        if [ -f ${API_PID_FILE} ]; then
+                            PID=\$(cat ${API_PID_FILE})
+                            echo "Stopping API process: \$PID"
+                            kill \$PID 2>/dev/null || true
+                            sleep 2
+                            kill -9 \$PID 2>/dev/null || true
+                            rm -f ${API_PID_FILE}
+                            echo "API server stopped"
+                        else
+                            echo "No API PID file found, stopping any python app processes"
+                            pkill -f "python.*app\\.py" 2>/dev/null || true
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('Build Python Package') {
+            steps {
+                script {
+                    echo "Building Python package :"
+                    sh '${VENV_PATH}/bin/pip install setuptools wheel'
+                    sh """
+                        cd ${APP_DIR}
+                        ${VENV_PATH}/bin/python setup.py sdist bdist_wheel
+                    """
+                    sh "ls -la ${APP_DIR}/dist/"
+                    
+                    // Récupération de la version du package
+                    def version = sh(script: "cd ${APP_DIR} && ${VENV_PATH}/bin/python setup.py --version", returnStdout: true).trim()
+                    env.PYTHON_PACKAGE_VERSION = version
+                }
+            }
+        }
+
+        stage('Deploy to Nexus') {
+            steps {
+                script {
+                    echo "Deploying to Nexus Sonatype : "
+                    withCredentials([usernamePassword(
+                        credentialsId: env.NEXUS_CREDENTIALS_ID,
+                        usernameVariable: 'NEXUS_USER',
+                        passwordVariable: 'NEXUS_PASSWORD'
+                    )]) {
+                        sh """
+                            cd ${APP_DIR}
+                            ${VENV_PATH}/bin/pip install twine
+                            # Upload des fichiers spécifiques
+                            ${VENV_PATH}/bin/twine upload \
+                                --repository-url ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/ \
+                                -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} \
+                                dist/user_management_app-*.tar.gz dist/user_management_app-*.whl || echo "Nexus upload failed"
+                        """
+                    }
+                }
+            }
+        }
 
         stage('Deploy to AWS') {
             steps {
                 script {
                     echo " Déploiement sur AWS..."
                     
-                    // CORRECTION ICI : Utilisation de simples quotes avec concaténation
-                    sh '''
-                        cd ''' + TF_WORKING_DIR + '''
+                    sh """
+                        cd ${TF_WORKING_DIR}
                         
                         # Initialisation Terraform
                         echo "Initialisation de Terraform..."
@@ -266,42 +461,51 @@ EOF
                         terraform apply -auto-approve tfplan
                         
                         # Récupération des outputs
-                        INSTANCE_IP=$(terraform output -raw instance_public_ip)
-                        APP_URL=$(terraform output -raw application_url)
+                        INSTANCE_IP=\$(terraform output -raw instance_public_ip)
+                        APP_URL=\$(terraform output -raw application_url)
+                        CLIENT_URL=\$(terraform output -raw client_url)
                         
                         echo " Infrastructure AWS déployée avec succès"
-                        echo " IP de l'instance: $INSTANCE_IP"
-                        echo " URL de l'application: $APP_URL"
+                        echo " IP de l'instance: \$INSTANCE_IP"
+                        echo " URL de l'application API: \$APP_URL"
+                        echo " URL de l'application Client: \$CLIENT_URL"
                         
                         # Attente que l'application soit disponible
                         echo " Attente du démarrage de l'application (peut prendre plusieurs minutes)..."
                         
                         # Tentative de connexion avec gestion d'erreur
                         COUNTER=0
-                        MAX_RETRIES=18 # 3 minutes max (18 * 10 secondes)
-                        while [ $COUNTER -lt $MAX_RETRIES ]; do
-                            if curl -s -f http://$INSTANCE_IP:5000/health > /dev/null; then
-                                echo " Application disponible!"
-                                break
-                            else
-                                echo "En attente... ($((COUNTER * 10)) secondes)"
-                                sleep 10
-                                COUNTER=$((COUNTER + 1))
+                        MAX_RETRIES=30 # 5 minutes max (30 * 10 secondes)
+                        while [ \$COUNTER -lt \$MAX_RETRIES ]; do
+                            if curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null; then
+                                echo " API disponible!"
+                                if curl -s -f http://\$INSTANCE_IP:8083/health > /dev/null; then
+                                    echo " Client disponible!"
+                                    break
+                                fi
                             fi
+                            echo "En attente... (\$((COUNTER * 10)) secondes)"
+                            sleep 10
+                            COUNTER=\$((COUNTER + 1))
                         done
                         
-                        if [ $COUNTER -eq $MAX_RETRIES ]; then
-                            echo " L'application ne répond pas après 3 minutes"
-                            echo "Cela peut être normal si le déploiement est encore en cours"
-                            echo "Vérifiez manuellement plus tard: http://$INSTANCE_IP:5000/health"
+                        if [ \$COUNTER -eq \$MAX_RETRIES ]; then
+                            echo " L'application ne répond pas après 5 minutes"
+                            echo "Vérifiez manuellement plus tard:"
+                            echo "API: http://\$INSTANCE_IP:5000/health"
+                            echo "Client: http://\$INSTANCE_IP:8083/health"
                         else
-                            echo " Application déployée et accessible sur: http://$INSTANCE_IP:5000"
+                            echo " Application déployée et accessible:"
+                            echo "API: http://\$INSTANCE_IP:5000"
+                            echo "Client: http://\$INSTANCE_IP:8083"
                             # Test final de l'application
-                            echo "Test de santé de l'application..."
-                            curl -s http://$INSTANCE_IP:5000/health
+                            echo "Test de santé de l'API..."
+                            curl -s http://\$INSTANCE_IP:5000/health
+                            echo "Test de santé du Client..."
+                            curl -s http://\$INSTANCE_IP:8083/health
                             echo " Déploiement AWS terminé avec succès!"
                         fi
-                    '''
+                    """
                 }
             }
             
@@ -310,7 +514,9 @@ EOF
                     script {
                         def instance_ip = sh(script: "cd ${TF_WORKING_DIR} && terraform output -raw instance_public_ip", returnStdout: true).trim()
                         env.DEPLOYMENT_URL = "http://${instance_ip}:5000"
-                        echo " Application déployée: ${env.DEPLOYMENT_URL}"
+                        env.CLIENT_URL = "http://${instance_ip}:8083"
+                        echo " API déployée: ${env.DEPLOYMENT_URL}"
+                        echo " Client déployé: ${env.CLIENT_URL}"
                     }
                 }
             }
@@ -357,6 +563,7 @@ EOF
                     .replace('${PYTHON_PACKAGE_VERSION}', env.PYTHON_PACKAGE_VERSION ?: 'N/A')
                     .replace('${BUILD_URL}', env.BUILD_URL ?: 'N/A')
                     .replace('${DEPLOYMENT_URL}', env.DEPLOYMENT_URL ?: 'N/A')
+                    .replace('${CLIENT_URL}', env.CLIENT_URL ?: 'N/A')
                     .replace('${CURRENT_YEAR}', new Date().format("yyyy"))
 
                 emailext (
