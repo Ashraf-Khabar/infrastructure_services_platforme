@@ -442,80 +442,54 @@ jenkins_custom_build_duration_seconds{job="${env.JOB_NAME}"} ${currentBuild.dura
                     sh """
                         cd ${TF_WORKING_DIR}
                         
-                        # Initialisation Terraform
-                        echo "Initialisation de Terraform..."
+                        # Initialisation et application Terraform
                         terraform init -input=false
-                        
-                        # Validation du plan
-                        echo "Validation de la configuration Terraform..."
                         terraform validate
-                        
-                        # Plan d'infrastructure
-                        echo "Création du plan d'infrastructure..."
                         terraform plan -out=tfplan
-                        
-                        # Application de l'infrastructure
-                        echo "Application de l'infrastructure..."
                         terraform apply -auto-approve tfplan
                         
-                        # Récupération des outputs
+                        # Récupération de l'IP
                         INSTANCE_IP=\$(terraform output -raw instance_public_ip)
-                        APP_URL=\$(terraform output -raw application_url)
-                        CLIENT_URL=\$(terraform output -raw client_url)
                         
-                        echo " Infrastructure AWS déployée avec succès"
-                        echo " IP de l'instance: \$INSTANCE_IP"
-                        echo " URL de l'application API: \$APP_URL"
-                        echo " URL de l'application Client: \$CLIENT_URL"
+                        # Copie de l'application complète sur l'instance
+                        echo "Copie de l'application sur l'instance..."
+                        rsync -avz -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \\
+                            ${APP_DIR}/ ubuntu@\$INSTANCE_IP:/home/ubuntu/user_management_app/
                         
-                        # Attente que l'application soit disponible
-                        echo " Attente du démarrage de l'application (peut prendre plusieurs minutes)..."
+                        # Reconstruction et redémarrage des containers
+                        ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@\$INSTANCE_IP << 'EOF'
+                            cd /home/ubuntu/user_management_app
+                            sudo docker-compose down
+                            sudo docker-compose build --no-cache
+                            sudo docker-compose up -d
+                            sleep 15
+                            sudo docker-compose ps
+                            sudo docker-compose logs --tail=10
+                        EOF
                         
-                        # Tentative de connexion avec gestion d'erreur
+                        # Attente et vérification
+                        echo "Attente du démarrage de l'application..."
                         COUNTER=0
-                        MAX_RETRIES=30 # 5 minutes max (30 * 10 secondes)
+                        MAX_RETRIES=30
                         while [ \$COUNTER -lt \$MAX_RETRIES ]; do
-                            if curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null; then
-                                echo " API disponible!"
-                                if curl -s -f http://\$INSTANCE_IP:8083/health > /dev/null; then
-                                    echo " Client disponible!"
-                                    break
-                                fi
+                            if curl -s -f http://\$INSTANCE_IP:5000/health > /dev/null && \\
+                            curl -s -f http://\$INSTANCE_IP:8083/health > /dev/null; then
+                                echo " Application disponible!"
+                                break
                             fi
                             echo "En attente... (\$((COUNTER * 10)) secondes)"
                             sleep 10
                             COUNTER=\$((COUNTER + 1))
                         done
                         
-                        if [ \$COUNTER -eq \$MAX_RETRIES ]; then
-                            echo " L'application ne répond pas après 5 minutes"
-                            echo "Vérifiez manuellement plus tard:"
-                            echo "API: http://\$INSTANCE_IP:5000/health"
-                            echo "Client: http://\$INSTANCE_IP:8083/health"
-                        else
-                            echo " Application déployée et accessible:"
-                            echo "API: http://\$INSTANCE_IP:5000"
-                            echo "Client: http://\$INSTANCE_IP:8083"
-                            # Test final de l'application
-                            echo "Test de santé de l'API..."
-                            curl -s http://\$INSTANCE_IP:5000/health
-                            echo "Test de santé du Client..."
-                            curl -s http://\$INSTANCE_IP:8083/health
-                            echo " Déploiement AWS terminé avec succès!"
-                        fi
+                        # Tests finaux
+                        echo "Test de santé de l'API..."
+                        curl -s http://\$INSTANCE_IP:5000/health
+                        echo "Test de santé du Client..."
+                        curl -s http://\$INSTANCE_IP:8083/health
+                        echo "Test de la page d'accueil..."
+                        curl -s http://\$INSTANCE_IP:8083 | head -n 5
                     """
-                }
-            }
-            
-            post {
-                success {
-                    script {
-                        def instance_ip = sh(script: "cd ${TF_WORKING_DIR} && terraform output -raw instance_public_ip", returnStdout: true).trim()
-                        env.DEPLOYMENT_URL = "http://${instance_ip}:5000"
-                        env.CLIENT_URL = "http://${instance_ip}:8083"
-                        echo " API déployée: ${env.DEPLOYMENT_URL}"
-                        echo " Client déployé: ${env.CLIENT_URL}"
-                    }
                 }
             }
         }
