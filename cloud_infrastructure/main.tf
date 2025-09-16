@@ -11,17 +11,27 @@ provider "aws" {
   region = var.aws_region
 }
 
-data "aws_vpc" "existing" {
-  id = "vpc-02346cf0516d0be84"  
-}
+# === Create a new VPC ===
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_support   = true
+  enable_dns_hostnames = true
 
-data "aws_internet_gateway" "existing" {
-  filter {
-    name   = "attachment.vpc-id"
-    values = [data.aws_vpc.existing.id]
+  tags = {
+    Name = "user-management-vpc"
   }
 }
 
+# === Internet Gateway ===
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "user-management-igw"
+  }
+}
+
+# === Ubuntu AMI ===
 data "aws_ami" "ubuntu" {
   most_recent = true
 
@@ -40,11 +50,12 @@ data "aws_ami" "ubuntu" {
     values = ["hvm"]
   }
 
-  owners = ["099720109477"]
+  owners = ["099720109477"] # Canonical
 }
 
+# === Public Subnet ===
 resource "aws_subnet" "public" {
-  vpc_id                  = data.aws_vpc.existing.id
+  vpc_id                  = aws_vpc.main.id
   cidr_block              = var.subnet_cidr
   availability_zone       = "${var.aws_region}a"
   map_public_ip_on_launch = true
@@ -54,12 +65,13 @@ resource "aws_subnet" "public" {
   }
 }
 
+# === Public Route Table ===
 resource "aws_route_table" "public" {
-  vpc_id = data.aws_vpc.existing.id
+  vpc_id = aws_vpc.main.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = data.aws_internet_gateway.existing.id
+    gateway_id = aws_internet_gateway.main.id
   }
 
   tags = {
@@ -72,10 +84,11 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
+# === Security Group ===
 resource "aws_security_group" "app" {
   name        = "user-management-sg-${formatdate("YYYYMMDD", timestamp())}"
   description = "Security group for user management app"
-  vpc_id      = data.aws_vpc.existing.id
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     from_port   = 22
@@ -122,6 +135,7 @@ resource "aws_security_group" "app" {
   }
 }
 
+# === Key Pair ===
 resource "aws_key_pair" "deployer" {
   key_name   = "user-management-deployer-key-${formatdate("YYYYMMDD-hhmmss", timestamp())}"
   public_key = file("~/.ssh/id_rsa.pub")
@@ -131,6 +145,7 @@ resource "aws_key_pair" "deployer" {
   }
 }
 
+# === EC2 Instance ===
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
@@ -149,6 +164,7 @@ resource "aws_instance" "app" {
   associate_public_ip_address = true
 }
 
+# === Elastic IP ===
 resource "aws_eip" "app" {
   instance = aws_instance.app.id
   vpc      = true
