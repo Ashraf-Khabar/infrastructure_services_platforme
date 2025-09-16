@@ -1,11 +1,9 @@
 #!/bin/bash
 
-# Mise à jour et installation
 apt-get update -y
 apt-get upgrade -y
 apt-get install -y python3 python3-pip net-tools
 
-# Création des répertoires
 mkdir -p /home/ubuntu/user_management_app
 cd /home/ubuntu/user_management_app
 

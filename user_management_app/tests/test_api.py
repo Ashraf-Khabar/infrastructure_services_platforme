@@ -2,8 +2,6 @@ import pytest
 import requests
 import hashlib
 
-# Tests d'API simples qui utilisent requests au lieu de TestClient
-
 def test_api_root():
     """Test the root endpoint"""
     try:

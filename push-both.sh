@@ -1,13 +1,9 @@
 #!/bin/bash
 
-# Script de synchronisation pour deux dépôts distants avec gestion d'erreurs améliorée
-
-# Configuration
 GITHUB_REPO="origin"
 GITLAB_REPO="gitlab"
 CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
 
-# Fonction pour vérifier la connectivité
 check_connectivity() {
     echo "Vérification de la connectivité..."
     
@@ -25,7 +21,6 @@ check_connectivity() {
     return 0
 }
 
-# Fonction pour pousser vers un dépôt avec retry
 push_with_retry() {
     local repo=$1
     local branch=$2
@@ -48,7 +43,6 @@ push_with_retry() {
     return 1
 }
 
-# Vérifier la connectivité d'abord
 if ! check_connectivity; then
     echo "Problème de réseau détecté. Vérifiez votre connexion Internet."
     echo "Vous pouvez essayer:"
@@ -58,23 +52,18 @@ if ! check_connectivity; then
     exit 1
 fi
 
-# 1. D'abord pousser les changements vers GitHub
 echo "Pushing les changements vers GitHub..."
-# Ajouter tous les nouveaux fichiers
 git add .
 
-# Vérifier ce qui va être commité
 echo "Status actuel:"
 git status --short
 
-# Committer seulement s'il y a des changements
 if git diff --cached --quiet; then
     echo "Aucun changement à committer."
 else
     git commit -m "Ajout des nouveaux fichiers - $(date '+%Y-%m-%d %H:%M:%S')"
 fi
 
-# Push vers GitHub avec retry
 if ! push_with_retry $GITHUB_REPO $CURRENT_BRANCH; then
     echo "ERREUR: Échec du push vers GitHub après plusieurs tentatives."
     echo "Vérifiez votre accès SSH/GitHub:"
@@ -82,22 +71,17 @@ if ! push_with_retry $GITHUB_REPO $CURRENT_BRANCH; then
     exit 1
 fi
 
-# 2. Synchroniser GitLab avec GitHub
 echo "Synchronisation de GitLab avec GitHub..."
 
-# Sauvegarder votre travail local (au cas où)
 echo "Sauvegarde de votre travail local..."
 git stash
 
-# Récupérer les derniers changements de GitHub
 echo "Récupération depuis GitHub..."
 git fetch $GITHUB_REPO
 
-# Réinitialiser pour correspondre à GitHub
 echo "Réinitialisation pour correspondre à GitHub..."
 git reset --hard $GITHUB_REPO/$CURRENT_BRANCH
 
-# Forcer le push vers GitLab avec retry
 if ! push_with_retry $GITLAB_REPO $CURRENT_BRANCH; then
     echo "ERREUR: Échec du push vers GitLab après plusieurs tentatives."
     echo "Restauration des changements locaux..."
@@ -107,7 +91,6 @@ if ! push_with_retry $GITLAB_REPO $CURRENT_BRANCH; then
     exit 1
 fi
 
-# Restaurer votre travail local
 echo "Restauration de votre travail local..."
 git stash pop
 

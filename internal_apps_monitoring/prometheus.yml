@@ -16,7 +16,7 @@ scrape_configs:
 
   - job_name: 'docker'
     static_configs:
-      - targets: ['docker.for.mac.host.internal:9323'] # Adjust for your OS
+      - targets: ['docker.for.mac.host.internal:9323']
     metrics_path: '/metrics'
 
   - job_name: 'user-management-api'
@@ -24,7 +24,6 @@ scrape_configs:
       - targets: ['user-management-api:5000']
     scrape_interval: 15s
 
-  # Configuration pour l'application Flask
   - job_name: 'user-management-client'
     static_configs:
       - targets: ['user-management-client:8083']

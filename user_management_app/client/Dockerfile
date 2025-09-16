@@ -14,6 +14,4 @@ COPY . .
 
 EXPOSE 3000
 
-# Use python to run the client app directly (not gunicorn for client)
-# Adjust based on your actual client entry point
 CMD ["python", "app.py"]
