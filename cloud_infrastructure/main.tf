@@ -11,17 +11,21 @@ provider "aws" {
   region = var.aws_region
 }
 
+#  Use existing VPC (update the ID if needed)
 data "aws_vpc" "existing" {
-  id = "vpc-074e57ae1b4e8e5d4"  
+  id = "vpc-074e57ae1b4e8e5d4"
 }
 
-data "aws_internet_gateway" "existing" {
-  filter {
-    name   = "attachment.vpc-id"
-    values = [data.aws_vpc.existing.id]
+#  Create a new Internet Gateway attached to that VPC
+resource "aws_internet_gateway" "this" {
+  vpc_id = data.aws_vpc.existing.id
+
+  tags = {
+    Name = "user-management-igw"
   }
 }
 
+#  Get latest Ubuntu AMI
 data "aws_ami" "ubuntu" {
   most_recent = true
 
@@ -40,9 +44,10 @@ data "aws_ami" "ubuntu" {
     values = ["hvm"]
   }
 
-  owners = ["099720109477"]
+  owners = ["099720109477"] # Canonical
 }
 
+#  Create Public Subnet
 resource "aws_subnet" "public" {
   vpc_id                  = data.aws_vpc.existing.id
   cidr_block              = var.subnet_cidr
@@ -54,12 +59,13 @@ resource "aws_subnet" "public" {
   }
 }
 
+#  Create Route Table and attach IGW
 resource "aws_route_table" "public" {
   vpc_id = data.aws_vpc.existing.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = data.aws_internet_gateway.existing.id
+    gateway_id = aws_internet_gateway.this.id
   }
 
   tags = {
@@ -67,11 +73,13 @@ resource "aws_route_table" "public" {
   }
 }
 
+#  Associate Route Table with Subnet
 resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.public.id
 }
 
+#  Security Group
 resource "aws_security_group" "app" {
   name        = "user-management-sg-${formatdate("YYYYMMDD", timestamp())}"
   description = "Security group for user management app"
@@ -122,6 +130,7 @@ resource "aws_security_group" "app" {
   }
 }
 
+#  Key Pair
 resource "aws_key_pair" "deployer" {
   key_name   = "user-management-deployer-key-${formatdate("YYYYMMDD-hhmmss", timestamp())}"
   public_key = file("~/.ssh/id_rsa.pub")
@@ -131,6 +140,7 @@ resource "aws_key_pair" "deployer" {
   }
 }
 
+#  EC2 Instance
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
@@ -149,6 +159,7 @@ resource "aws_instance" "app" {
   associate_public_ip_address = true
 }
 
+#  Elastic IP
 resource "aws_eip" "app" {
   instance = aws_instance.app.id
   vpc      = true
