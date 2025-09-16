@@ -6,7 +6,7 @@ apt-get install -y python3 python3-pip net-tools git
 
 # Cloner le projet
 cd /home/ubuntu
-git clone <URL_DU_PROJET> infrastructure_services_platforme
+git clone https://github.com/Ashraf-Khabar/infrastructure_services_platforme.git
 cd infrastructure_services_platforme
 
 # Vérifier la structure du projet
