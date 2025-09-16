@@ -166,4 +166,3 @@ Check for issues in:
 4. Security Group rules
 
 Build metrics are available in Prometheus for performance analysis.
-```
