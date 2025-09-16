@@ -11,7 +11,7 @@ provider "aws" {
   region = var.aws_region
 }
 
-# === Create a new VPC ===
+# === VPC ===
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
@@ -53,7 +53,7 @@ data "aws_ami" "ubuntu" {
   owners = ["099720109477"] # Canonical
 }
 
-# === Public Subnet ===
+# === Subnet publique ===
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = var.subnet_cidr
@@ -65,7 +65,7 @@ resource "aws_subnet" "public" {
   }
 }
 
-# === Public Route Table ===
+# === Route Table publique ===
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -145,7 +145,7 @@ resource "aws_key_pair" "deployer" {
   }
 }
 
-# === EC2 Instance ===
+# === Instance EC2 ===
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
@@ -157,11 +157,11 @@ resource "aws_instance" "app" {
     app_directory = "/home/ubuntu/user_management_app"
   })
 
+  associate_public_ip_address = true
+
   tags = {
     Name = "user-management-app"
   }
-
-  associate_public_ip_address = true
 }
 
 # === Elastic IP ===
