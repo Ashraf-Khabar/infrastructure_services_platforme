@@ -2,16 +2,31 @@
 
 apt-get update -y
 apt-get upgrade -y
-apt-get install -y python3 python3-pip net-tools
+apt-get install -y python3 python3-pip net-tools git
 
+# Cloner le projet
+cd /home/ubuntu
+git clone <URL_DU_PROJET> infrastructure_services_platforme
+cd infrastructure_services_platforme
+
+# Vérifier la structure du projet
+echo "Structure du projet cloné:"
+find . -type d -name "user_management_app" | head -5
+
+# Créer le répertoire de destination
 mkdir -p /home/ubuntu/user_management_app
 cd /home/ubuntu/user_management_app
 
-# Service API
-mkdir -p api
-cd api
-
-cat > app.py << 'EOF'
+# Copier les fichiers de l'API
+if [ -d "/home/ubuntu/infrastructure_services_platforme/user_management_app/api" ]; then
+    echo "Copie des fichiers API..."
+    cp -r /home/ubuntu/infrastructure_services_platforme/user_management_app/api/* /home/ubuntu/user_management_app/api/
+else
+    echo "Répertoire API non trouvé, création de la structure par défaut..."
+    mkdir -p api
+    cd api
+    
+    cat > app.py << 'EOF'
 from flask import Flask, jsonify
 app = Flask(__name__)
 
@@ -31,19 +46,27 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
 EOF
 
-cat > requirements.txt << 'EOF'
+    cat > requirements.txt << 'EOF'
 flask==2.3.3
 gunicorn==21.2.0
 EOF
+fi
 
+# Installer les dépendances de l'API
+cd /home/ubuntu/user_management_app/api
 pip3 install -r requirements.txt
 
-# Service Client
-cd ..
-mkdir -p client
-cd client
-
-cat > app.py << 'EOF'
+# Copier les fichiers du Client
+cd /home/ubuntu/user_management_app
+if [ -d "/home/ubuntu/infrastructure_services_platforme/user_management_app/client" ]; then
+    echo "Copie des fichiers Client..."
+    cp -r /home/ubuntu/infrastructure_services_platforme/user_management_app/client/* /home/ubuntu/user_management_app/client/
+else
+    echo "Répertoire Client non trouvé, création de la structure par défaut..."
+    mkdir -p client
+    cd client
+    
+    cat > app.py << 'EOF'
 from flask import Flask, jsonify
 import requests
 app = Flask(__name__)
@@ -71,14 +94,17 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8083, debug=False)
 EOF
 
-cat > requirements.txt << 'EOF'
+    cat > requirements.txt << 'EOF'
 flask==2.3.3
 requests==2.31.0
 EOF
+fi
 
+# Installer les dépendances du Client
+cd /home/ubuntu/user_management_app/client
 pip3 install -r requirements.txt
 
-# Création des services systemd pour API (CORRIGÉ: /etc/systemd/system/)
+# Création des services systemd pour API
 cat > /etc/systemd/system/user-management-api.service << 'EOF'
 [Unit]
 Description=User Management API Service
@@ -97,7 +123,7 @@ Environment=PYTHONUNBUFFERED=1
 WantedBy=multi-user.target
 EOF
 
-# Création des services systemd pour Client (CORRIGÉ: /etc/systemd/system/)
+# Création des services systemd pour Client
 cat > /etc/systemd/system/user-management-client.service << 'EOF'
 [Unit]
 Description=User Management Client Service
