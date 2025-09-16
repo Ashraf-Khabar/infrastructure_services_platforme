@@ -14,7 +14,7 @@ app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key")
 
 # Déterminer l'URL de l'API
 IS_DOCKER = os.environ.get('DOCKER', 'false').lower() == 'true'
-API_URL = "http://user-management-api:5000" if IS_DOCKER else "http://localhost:5002"
+API_URL = "http://52.45.14.171:5000/health" if IS_DOCKER else "http://localhost:5002"
 
 def get_password_hash(password):
     return hashlib.sha256(password.encode()).hexdigest()
