@@ -19,7 +19,9 @@ This project deploys a user management application to AWS using Terraform and Je
 └── internal_apps_monitoring/
 ```
 
-<img src="./images/archi.png" wedth=50 ></img>
+<center>
+<img src="./images/archi.png" width="650" height="550" ></img>
+</center>
 
 ## Prerequisites
 
