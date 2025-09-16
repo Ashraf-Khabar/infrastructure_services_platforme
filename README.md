@@ -20,7 +20,7 @@ This project deploys a user management application to AWS using Terraform and Je
 ```
 
 <center>
-<img src="./images/archi.png" width="650" height="550" ></img>
+<img src="./images/archi.png"></img>
 </center>
 
 ## Prerequisites
